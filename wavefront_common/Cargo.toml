@@ -1,0 +1,18 @@
+[package]
+name = "wavefront_common"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+winit = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true }
+glam = { workspace = true }
+rand = { workspace = true }
+imgui = { workspace = true }
+imgui-wgpu = { workspace = true }
+imgui-winit-support = { workspace = true }

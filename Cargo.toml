@@ -1,0 +1,28 @@
+[workspace]
+
+members = [
+    "cpu_wavefront_pt",
+    "gpu_wavefront_pt",
+    "wavefront_common",
+]
+
+resolver = "2"
+
+[workspace.package]
+name = "wave_front_path_tracer"
+version = "0.1.0"
+authors = ["rchiaramo <rchiaramo@gmail.com>"]
+edition = "2021"
+
+[workspace.dependencies]
+winit = "0.30.5"
+env_logger = "0.11.5"
+log = "0.4.22"
+wgpu = "22.1.0"
+pollster = "0.3.0"
+bytemuck = { version = "1.17.0", features = ["derive"] }
+glam = "0.29.0"
+rand = "0.9.0-alpha.2"
+imgui = { path = "../other_peoples_code/imgui-rs/imgui" }
+imgui-wgpu = { path = "../other_peoples_code/imgui-wgpu-rs"}
+imgui-winit-support = { path = "../other_peoples_code/imgui-winit-support" }
