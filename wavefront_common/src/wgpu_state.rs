@@ -1,8 +1,10 @@
+use std::cell::{Ref, RefCell, RefMut};
 use std::sync::Arc;
+use wgpu::Surface;
 use winit::window::Window;
 
 pub struct WgpuState<'a> {
-    surface: wgpu::Surface<'a>,
+    surface: Surface<'a>,
     surface_config: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -37,9 +39,10 @@ impl<'a> WgpuState<'a> {
             }
         ).await.expect("Failed to find an appropriate adapter");
 
+        let features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
-                required_features: wgpu::Features::empty(),
+                required_features: features,
                 required_limits: wgpu::Limits {
                     max_storage_buffer_binding_size: 1024_u32 << 20,
                     max_buffer_size: 1024_u64 << 20,
@@ -81,7 +84,7 @@ impl<'a> WgpuState<'a> {
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
-    pub fn surface(&self) -> &wgpu::Surface {
+    pub fn surface(&mut self) -> &Surface {
         &self.surface
     }
 

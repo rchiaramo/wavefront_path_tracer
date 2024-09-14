@@ -45,10 +45,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let screen_pos = id.xy;
     let idx = id.x + id.y * width;
 
-    // when we generate initial rays, frame always = 0
-    var rng_state:u32 = init_rng(screen_pos, vec2(width, height), 0);
+    var rng_state:u32 = init_rng(screen_pos, vec2(width, height), frame_buffer.frame);
 
-    var offset: vec3f = rng_next_vec3in_unit_disk(rng_state);
+    var offset: vec3f = rng_next_vec3in_unit_disk(&rng_state);
     var ray: Ray;
 
     var ndc_point = vec2((f32(id.x) + offset.x) / f32(width), 1.0 - (f32(id.y) + offset.y) / f32(height) );
@@ -59,7 +58,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     ray.origin = camera.pos.xyz;
 
     if camera.defocusRadius > 0.0 {
-        offset = rng_next_vec3in_unit_disk(state);
+        offset = rng_next_vec3in_unit_disk(&rng_state);
         var p_lens = vec4f((camera.defocusRadius * offset).xyz, 1.0);
         var lens_origin = view_matrix.view * p_lens;
         lens_origin = lens_origin / lens_origin.w;

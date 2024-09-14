@@ -1,5 +1,6 @@
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, RenderPipeline, ShaderStages, Surface, TextureFormat};
 use wavefront_common::gpu_buffer::GPUBuffer;
+use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::Queries;
 
 pub struct DisplayKernel {
@@ -104,12 +105,12 @@ impl DisplayKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, surface: &mut Surface, device: &Device, queue: &Queue) {
-        let output = surface.get_current_texture().unwrap();
+    pub fn run(&self, wgpu_state: &mut WgpuState) {
+        let output = wgpu_state.surface().get_current_texture().unwrap();
         let view = output.texture.create_view(
             &wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = device.create_command_encoder(
+        let mut encoder = wgpu_state.device().create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("display kernel encoder"),
             });
@@ -138,7 +139,7 @@ impl DisplayKernel {
             //     gui.imgui.render(), queue, device, &mut display_pass
             // ).expect("failed to render gui");
         }
-        queue.submit(Some(encoder.finish()));
+        wgpu_state.queue().submit(Some(encoder.finish()));
         output.present();
     }
 }

@@ -96,7 +96,7 @@ impl GenerateRayKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32), mut queries: Queries) {
+    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32), mut _queries: Queries) {
 
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
@@ -107,20 +107,21 @@ impl GenerateRayKernel {
         {
             let mut generate_rays_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("generate rays pass"),
-                timestamp_writes: Some(ComputePassTimestampWrites {
-                    query_set: &queries.set,
-                    beginning_of_pass_write_index: Some(queries.next_unused_query),
-                    end_of_pass_write_index: Some(queries.next_unused_query + 1),
-                })
+                timestamp_writes: None
+                // timestamp_writes: Some(ComputePassTimestampWrites {
+                //     query_set: &queries.set,
+                //     beginning_of_pass_write_index: Some(queries.next_unused_query),
+                //     end_of_pass_write_index: Some(queries.next_unused_query + 1),
+                // })
             });
-            queries.next_unused_query += 2;
+            // queries.next_unused_query += 2;
             generate_rays_pass.set_pipeline(&self.pipeline);
             generate_rays_pass.set_bind_group(0, &self.ray_buffer_bind_group, &[]);
-            generate_rays_pass.set_bind_group(2, &self.parameters_buffer_bind_group, &[]);
+            generate_rays_pass.set_bind_group(1, &self.parameters_buffer_bind_group, &[]);
             generate_rays_pass.dispatch_workgroups(workgroup_size.0, workgroup_size.1, 1);
 
         }
-        queries.resolve(&mut encoder);
+        // queries.resolve(&mut encoder);
         queue.submit(Some(encoder.finish()));
     }
 

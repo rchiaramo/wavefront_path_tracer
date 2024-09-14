@@ -83,6 +83,10 @@ impl RenderProgress {
         GPUFrameBuffer::new(width, height, self.frame, self.accumulated_samples)
     }
 
+    pub fn current_frame(&self) -> u32 {
+        self.frame
+    }
+
     pub fn get_next_frame(&mut self, rp: &mut RenderParameters) -> GPUFrameBuffer {
         // if accumulated samples is 0, there's been something that triggered a reset
         let current_progress = self.accumulated_samples;

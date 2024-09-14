@@ -118,11 +118,8 @@ impl<'a> PathTracer<'a> {
                                                            BufferUsages::UNIFORM,
                                                            bytemuck::cast_slice(&[view_mat]),
                                                            Some("view buffer"));
-        
-        // set the viewport of last parameters to something different so that on the first
-        // pass, last is different from current render parameters
-        let mut last_render_parameters = render_parameters.clone();
-        last_render_parameters.set_viewport((0,0));
+
+        let last_render_parameters = render_parameters.clone();
 
         let spf = render_parameters.sampling_parameters().samples_per_frame;
         let spp= render_parameters.sampling_parameters().samples_per_pixel;
@@ -171,7 +168,7 @@ impl<'a> PathTracer<'a> {
         }
     }
 
-    pub fn wgpu_state(&self) -> &WgpuState {
+    pub fn wgpu_state(&'a self) -> &'a WgpuState {
         &self.wgpu_state
     }
 
@@ -187,53 +184,73 @@ impl<'a> PathTracer<'a> {
         self.render_parameters.clone()
     }
 
+    pub fn resize(&mut self, rp: RenderParameters) {
+        self.wgpu_state.resize(rp.get_viewport());
+        self.update_render_parameters(rp);
+
+    }
     pub fn update_render_parameters(&mut self, render_parameters: RenderParameters) {
         self.render_parameters = render_parameters;
-        if render_parameters.get_viewport() != self.last_render_parameters.get_viewport() {
-            self.wgpu_state.resize(render_parameters.get_viewport());
-        }
     }
 
     pub fn update_buffers(&mut self) {
-        // if rp is the same as the stored buffer, no need to do anything
-        if self.render_parameters == self.last_render_parameters {
-            return;
-        }
-
+        // always update the frame
         let queue = self.wgpu_state.queue();
+        let frame = self.render_progress.get_next_frame(&mut self.render_parameters);
+        self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
+        self.last_render_parameters = self.get_render_parameters();
 
-        let camera_controller = self.render_parameters.camera_controller();
-        // update the projection matrix
-        let (w,h) = self.render_parameters.get_viewport();
-        let ar = w as f32 / h as f32;
-        let (z_near, z_far) = camera_controller.get_clip_planes();
-        let proj_mat = ProjectionMatrix::new(camera_controller.vfov_rad(), ar, z_near, z_far).p_inv();
-        self.projection_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[proj_mat]));
+        let gpu_sampling_parameters
+            = GPUSamplingParameters::get_gpu_sampling_params(self.render_parameters.sampling_parameters());
+        self.sampling_parameters_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[gpu_sampling_parameters]));
 
-        // update the view matrix
-        let view_mat = camera_controller.get_view_matrix();
-        self.view_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[view_mat]));
-
-        // update the camera
-        let gpu_camera = self.render_parameters.camera_controller().get_GPU_camera();
-        self.camera_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[gpu_camera]));
-
-        self.render_progress.reset();
+        // if rp is the same as the stored buffer, no need to do anything
+        // if self.render_parameters == self.last_render_parameters {
+        //     return;
+        // }
+        //
+        // let camera_controller = self.render_parameters.camera_controller();
+        // // update the projection matrix
+        // let (w,h) = self.render_parameters.get_viewport();
+        // let ar = w as f32 / h as f32;
+        // let (z_near, z_far) = camera_controller.get_clip_planes();
+        // let proj_mat = ProjectionMatrix::new(camera_controller.vfov_rad(), ar, z_near, z_far).p_inv();
+        // self.projection_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[proj_mat]));
+        //
+        // // update the view matrix
+        // let view_mat = camera_controller.get_view_matrix();
+        // self.view_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[view_mat]));
+        //
+        // // update the camera
+        // let gpu_camera = self.render_parameters.camera_controller().get_GPU_camera();
+        // self.camera_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[gpu_camera]));
+        //
+        // self.last_render_parameters = self.get_render_parameters();
+        // self.render_progress.reset();
     }
 
     pub fn run(&mut self) {
         self.update_buffers();
         let (width, height) = self.render_parameters.get_viewport();
+
         let device = self.wgpu_state.device();
         let queue = self.wgpu_state.queue();
         let mut queries = Queries::new(device, 2);
 
         // fundamental rendering loop
-
+        // remember this gets called every frame and renders the whole scene,
+        // accumulating pixel color
+        // therefore, we generate new initial rays every time here
         self.generate_ray_kernel.run(device,
-                                     queue,
-                                     (width, height),
-                                     queries);
+                                         queue,
+                                         (width, height),
+                                         queries);
+
+
+        let mut queries = Queries::new(device, 2);
+        self.compute_rest_kernel.run(device, queue, (width, height), queries);
+
+        self.display_kernel.run(&mut self.wgpu_state);
 
     }
 }

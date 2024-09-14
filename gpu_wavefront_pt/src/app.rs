@@ -66,8 +66,8 @@ impl ApplicationHandler for App<'_> {
                 &mut self.scene,
                 &self.render_parameters);
 
-            let wgpu_state  = path_tracer.wgpu_state();
-            self.gui = GUI::new(&window, wgpu_state);
+            // let wgpu_state  = path_tracer.wgpu_state();
+            // self.gui = GUI::new(&window, wgpu_state);
             self.path_tracer = Some(path_tracer);
         }
     }
@@ -97,7 +97,7 @@ impl ApplicationHandler for App<'_> {
                 WindowEvent::Resized(new_size) => {
                     let (width, height) = (new_size.width, new_size.height);
                     rp.set_viewport((width, height));
-                    path_tracer.update_render_parameters(rp);
+                    path_tracer.resize(rp);
                 }
 
                 WindowEvent::RedrawRequested => {
