@@ -1,20 +1,16 @@
 use crate::bvh::BVHNode;
-use crate::gpu_buffer::GPUBuffer;
+use crate::gpu_buffer::GPUStorageBuffer;
 use crate::gpu_structs::{GPUSamplingParameters};
 use crate::material::Material;
 use crate::sphere::Sphere;
+use crate::gpu_rng::{GpuRng};
 use wavefront_common::gpu_structs::GPUFrameBuffer;
 use wavefront_common::camera_controller::{GPUCamera};
 use glam::{Mat4, UVec2, UVec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use rayon::iter::{ParallelIterator, IntoParallelIterator, IntoParallelRefIterator};
 use wgpu::Queue;
-
-const EPSILON: f32 = 0.001;
-
-const PI: f32 = 3.1415927;
-const FRAC_1_PI: f32 = 0.31830987;
-const FRAC_PI_2: f32 = 1.5707964;
-const USE_BVH: bool = true;
+use crate::ray::Ray;
+use wavefront_common::constants::{PI, USE_BVH};
 
 pub struct ComputeShader {
     spheres: Vec<Sphere>,
@@ -22,11 +18,9 @@ pub struct ComputeShader {
     bvh_tree: Vec<BVHNode>,
     camera_data: GPUCamera,
     sampling_parameters: GPUSamplingParameters,
-    inv_proj_matrix: [[f32;4];4],
-    view_matrix: [[f32;4];4],
     frame_buffer: [u32;4],
     pixels: Vec<[f32;3]>,
-    rngState: GPURNG,
+    rng_state: GpuRng,
 }
 
 #[derive(Copy, Clone, Default)]
@@ -40,48 +34,31 @@ struct HitPayload {
 // Frame buffer
 // [width, height, frame, accumulated_samples]
 
-#[derive(Clone, Copy)]
-struct Ray {
-    origin: Vec3,
-    direction: Vec3,
-}
-
 impl ComputeShader {
+
     pub fn new(spheres: Vec<Sphere>,
                materials: Vec<Material>,
                bvh_tree: Vec<BVHNode>,
                camera_data: GPUCamera,
-               inv_proj_matrix: [[f32;4];4],
-               view_matrix: [[f32;4];4],
                sampling_parameters: GPUSamplingParameters,
                frame_buffer: GPUFrameBuffer,
                max_size: u32) -> Self {
 
         let pixels = vec![[0.0f32; 3]; max_size as usize];
-        Self { 
+        Self {
             spheres,
             materials,
             bvh_tree,
             camera_data,
             sampling_parameters,
-            inv_proj_matrix,
-            view_matrix,
             frame_buffer: frame_buffer.into_array(),
             pixels,
-            rngState: GPURNG::default(),
+            rng_state: GpuRng::default(),
         }
     }
 
     pub fn queue_camera(&mut self, gpucamera: GPUCamera) {
         self.camera_data = gpucamera;
-    }
-
-    pub fn queue_proj(&mut self, proj_mat: [[f32;4];4]) {
-        self.inv_proj_matrix = proj_mat;
-    }
-
-    pub fn queue_view(&mut self, view_mat: [[f32;4];4]) {
-        self.view_matrix = view_mat;
     }
 
     pub fn queue_sampling(&mut self, sampling_parameters: GPUSamplingParameters) {
@@ -92,135 +69,74 @@ impl ComputeShader {
         self.frame_buffer = frame.into_array();
     }
 
-    pub fn run_parallel_render(&mut self, queue: &Queue, size: (u32, u32), image_buffer: &mut GPUBuffer) {
-        let image_size = (self.frame_buffer[0] as usize, self.frame_buffer[1] as usize);
-        let mut image = vec![[0f32;3]; self.pixels.len()];
+    pub fn run(&self, ray_buffer: &[Ray]) -> &Vec<[f32; 3]> {
+        let (width, height) = (self.frame_buffer[0] as usize, self.frame_buffer[1] as usize);
+        let image_size = width * height;
+        let mut image = vec![[0f32; 3]; image_size];
 
-        let bands: Vec<(usize, &mut [[f32;3]])> = image.chunks_mut(size.0 as usize).enumerate().collect();
-        bands.into_par_iter().for_each(|(i, row)| {
+        let bands: Vec<(usize, &mut [[f32; 3]])> = image.chunks_mut(width).enumerate().collect();
+        bands.into_par_iter().for_each(|(i, image_row)| {
             let screen_pos = UVec2::new(0u32, i as u32);
-            let mut rngState = GPURNG::initRng(screen_pos, image_size, self.frame_buffer[2]);
-            self.main_cs_parallel(row, i, &mut rngState);
+            let mut rng_state = GpuRng::init_rng(screen_pos, (width, height), self.frame_buffer[2]);
+            self.process_row(ray_buffer, image_row, i, width, &mut rng_state);
         });
 
         // if the accumulator = 1, clear the buffer first, otherwise add to it
         if self.sampling_parameters.clear_image() == 1 {
-            for idx in 0..self.pixels.len() {
+            for idx in 0..image_size {
                 self.pixels[idx] = image[idx];
             }
         } else {
-            for idx in 0..self.pixels.len() {
+            for idx in 0..image_size {
                 self.pixels[idx][0] += image[idx][0];
                 self.pixels[idx][1] += image[idx][1];
                 self.pixels[idx][2] += image[idx][2];
             }
         }
-        image_buffer.queue_for_gpu(queue, bytemuck::cast_slice(self.pixels.as_slice()));
+        &self.pixels
     }
 
-    pub fn main_cs_parallel(&self, pixel_row: &mut [[f32;3]], row: usize, rngState: &mut GPURNG) {
-        for x in 0..pixel_row.iter().len() {
-            let mut pixel_color = Vec3::from_array(pixel_row[x]);
-
-            for _i in 0..self.sampling_parameters.spf() {
-                let ray = self.getRay_parallel(x as u32, row as u32, rngState);
-                pixel_color += self.rayColor_parallel(ray, rngState);
-            }
-
-            pixel_row[x] = pixel_color.to_array();
+    pub fn process_row(&self, ray_buffer: &[Ray], pixels: &mut [[f32;3]],
+                               row: usize, width: usize, rng_state: &mut GpuRng) {
+        for x in 0..width {
+            let idx = x + width * row;
+            let ray = ray_buffer[idx];
+            pixels[idx] = self.ray_color(ray, rng_state).to_array();
         }
     }
 
-    fn rayColor_parallel(&self, primaryRay: Ray, rngState: &mut GPURNG) -> Vec3 {
+    fn ray_color(&self, primary_ray: Ray, rng_state: &mut GpuRng) -> Vec3 {
         // for every ray, we want to trace the ray through num_bounces
-        // rayColor calls traceRay to get a hit, then calls it again
+        // ray_color calls traceRay to get a hit, then calls it again
         // with new bounce ray
-        let mut nextRay = primaryRay.clone();
+        let mut next_ray = primary_ray.clone();
         let mut throughput = Vec3::ONE;
         let mut pixel_color = Vec3::ZERO;
         for _i in 0 .. self.sampling_parameters.num_bounces() {
-            let mut payLoad = HitPayload::default();
+            let mut pay_load = HitPayload::default();
 
-            if self.TraceRay(nextRay, &mut payLoad) {
+            if self.trace_ray(next_ray, &mut pay_load) {
                 // depending on what kind of material, I need to find the scatter ray and the attenuation
-                let mat_idx:u32 = self.spheres[payLoad.idx as usize].material_idx();
-                nextRay = self.getScatterRay_parallel(nextRay, mat_idx, payLoad, rngState);
+                let mat_idx:u32 = self.spheres[pay_load.idx as usize].material_idx();
+                next_ray = self.getScatterRay_parallel(next_ray, mat_idx, pay_load, rng_state);
 
                 throughput *= self.materials[mat_idx as usize].albedo().xyz();
             } else {
-                let a: f32 = 0.5 * (primaryRay.direction.y + 1.0);
+                let a: f32 = 0.5 * (primary_ray.direction.y + 1.0);
                 pixel_color = throughput * ((1.0 - a) * Vec3::ONE + a * Vec3::new(0.5, 0.7, 1.0));
                 break;
             }
         }
-
-        return pixel_color;
+        pixel_color
     }
 
-    pub fn run_render(&mut self, queue: &Queue, size: (u32, u32), image_buffer: &mut GPUBuffer) {
-        for y in 0..size.1 {
-            for x in 0..size.0 {
-                let id = UVec3::new(x, y, 0);
-                self.main_cs(id);
-            }
-        }
-        image_buffer.queue_for_gpu(queue, bytemuck::cast_slice(self.pixels.as_slice()));
-    }
-
-    pub fn main_cs(&mut self, id: UVec3) {
-        let idx = id.x as usize + (self.frame_buffer[0] * id.y) as usize;
-
-        let image_size = (self.frame_buffer[0] as usize, self.frame_buffer[1] as usize);
-        let screen_pos = id.xy();
-        self.rngState = GPURNG::initRng(screen_pos, image_size, self.frame_buffer[2]);
-
-        // if the accumulator = 0, zero out the image buffer
-        if self.sampling_parameters.clear_image() == 1 {
-            self.pixels[idx] = [0f32; 3];
-        }
-        let mut pixel_color = Vec3::from_array(self.pixels[idx]);
-
-        for _i in 0..self.sampling_parameters.spf() {
-            let ray = self.getRay(id.x, id.y);
-            pixel_color += self.rayColor(ray);
-        }
-
-        self.pixels[idx] = pixel_color.to_array();
-    }
-
-    fn rayColor(&mut self, primaryRay: Ray) -> Vec3 {
-        // for every ray, we want to trace the ray through num_bounces
-        // rayColor calls traceRay to get a hit, then calls it again
-        // with new bounce ray
-        let mut nextRay = primaryRay.clone();
-        let mut throughput = Vec3::ONE;
-        let mut pixel_color = Vec3::ZERO;
-        for _i in 0 .. self.sampling_parameters.num_bounces() {
-            let mut payLoad = HitPayload::default();
-
-            if self.TraceRay(nextRay, &mut payLoad) {
-                // depending on what kind of material, I need to find the scatter ray and the attenuation
-                let mat_idx:u32 = self.spheres[payLoad.idx as usize].material_idx();
-                nextRay = self.getScatterRay(nextRay, mat_idx, payLoad);
-
-                throughput *= self.materials[mat_idx as usize].albedo().xyz();
-            } else {
-                let a: f32 = 0.5 * (primaryRay.direction.y + 1.0);
-                pixel_color = throughput * ((1.0 - a) * Vec3::ONE + a * Vec3::new(0.5, 0.7, 1.0));
-                break;
-            }
-        }
-
-        return pixel_color;
-    }
-
-    fn TraceRay(&self, ray: Ray, hit: &mut HitPayload) -> bool {
+    fn trace_ray(&self, ray: Ray, hit: &mut HitPayload) -> bool {
         // runs through objects in the scene and returns true if the ray hits one, and updates
         // the hitPayload with the closest hit
 
         let mut nearest_hit: f32 = 1e29;
         let sphere_count = self.spheres.len();
-        let mut tempHitPayload = HitPayload::default();
+        let mut temp_hit_payload = HitPayload::default();
 
         if USE_BVH {
             // this is where I will implement the BVH tree search rather than using a full primitive search
@@ -228,15 +144,15 @@ impl ComputeShader {
             let mut stack_pointer = 0usize;
             let mut node_index = 0usize;
 
-            while true {
+            loop {
                 if self.bvh_tree[node_index].prim_count > 0 {
                     // this is a leaf and has primitives, so check to see if primitives are hit
                     for idx in 0..self.bvh_tree[node_index].prim_count {
-                        let mut newHitPayload = HitPayload::default();
+                        let mut new_hit_payload = HitPayload::default();
                         let i = self.bvh_tree[node_index].left_first;
-                        if self.hit(ray, i + idx, 0.001, nearest_hit, &mut newHitPayload) {
-                            nearest_hit = newHitPayload.t;
-                            tempHitPayload = newHitPayload;
+                        if self.hit(ray, i + idx, 0.001, nearest_hit, &mut new_hit_payload) {
+                            nearest_hit = new_hit_payload.t;
+                            temp_hit_payload = new_hit_payload;
                         }
                     }
                     if stack_pointer == 0 {
@@ -283,23 +199,23 @@ impl ComputeShader {
         } else {
             // this is the old code with full primitive search
             for i in 0..sphere_count {
-                let mut newHitPayload= HitPayload::default();
+                let mut new_hit_payload = HitPayload::default();
 
                 // I could update this code so that hit only determines if a hit happened and, if it did,
                 // modifies the nearest_hit_t and stores the nearest_index
-                if self.hit(ray, i as u32, 0.001, nearest_hit, &mut newHitPayload) {
-                    nearest_hit = newHitPayload.t;
-                    tempHitPayload = newHitPayload;
+                if self.hit(ray, i as u32, 0.001, nearest_hit, &mut new_hit_payload) {
+                    nearest_hit = new_hit_payload.t;
+                    temp_hit_payload = new_hit_payload;
                 }
             }
         }
         // then after looping through the objects, we will know the nearest_hit_t and the index; we could call
         // for the payload then (as opposed to filling it out every time we hit a closer sphere)
         if nearest_hit < 1e29 {
-            *hit = tempHitPayload;
+            *hit = temp_hit_payload;
             return true;
         }
-        return false;
+        false
     }
 
     fn hit_bvh_node(&self, ray: &Ray, node: &BVHNode) -> f32 {
@@ -323,10 +239,10 @@ impl ComputeShader {
         }
     }
 
-    fn hit(&self, ray: Ray, sphereIdx: u32, t_min: f32, t_nearest: f32, payload: & mut HitPayload) -> bool {
-        // checks if the ray intersects the sphere given by sphereIdx; if so, returns true and modifies
+    fn hit(&self, ray: Ray, sphere_idx: u32, t_min: f32, t_nearest: f32, payload: & mut HitPayload) -> bool {
+        // checks if the ray intersects the sphere given by sphere_idx; if so, returns true and modifies
         // a hitPayload to give the details of the hit
-        let sphere: Sphere = self.spheres[sphereIdx as usize];
+        let sphere: Sphere = self.spheres[sphere_idx as usize];
         let sphere_center = sphere.center.xyz();
         let a: f32 = ray.direction.dot(ray.direction);
         let b: f32 = ray.direction.dot(ray.origin - sphere_center);
@@ -338,20 +254,20 @@ impl ComputeShader {
         if (discrim >= 0.0) {
             let mut t = (-b - discrim.sqrt()) / a;
             if (t > t_min && t < t_nearest) {
-                *payload = self.hitSphere(t, ray, sphere, sphereIdx);
+                *payload = self.hit_sphere(t, ray, sphere, sphere_idx);
                 return true;
             }
 
             t = (-b + discrim.sqrt()) / a;
             if (t > t_min && t < t_nearest) {
-                *payload = self.hitSphere(t, ray, sphere, sphereIdx);
+                *payload = self.hit_sphere(t, ray, sphere, sphere_idx);
                 return true;
             }
         }
-        return false;
+        false
     }
 
-    fn hitSphere(&self, t: f32, ray: Ray, sphere: Sphere, idx: u32) -> HitPayload {
+    fn hit_sphere(&self, t: f32, ray: Ray, sphere: Sphere, idx: u32) -> HitPayload {
         // make the hitPayload struct
         // note that decision here is that normals ALWAYS point out of the sphere
         // thus, to test whether a ray is intersecting the sphere from the inside vs the outside,
@@ -360,43 +276,13 @@ impl ComputeShader {
         let p = ray.origin + t * ray.direction;
         let mut n = (p - sphere.center.xyz()).normalize();
 
-        return HitPayload {t, p, n, idx}
+        HitPayload {t, p, n, idx}
     }
 
-    fn getRay_parallel(&self, x: u32, y: u32, rngState: &mut GPURNG) -> Ray {
-        let mut offset = rngState.rngNextVec3InUnitDisk();
-
-        let mut point = Vec2::new((x as f32 + offset.x) / self.frame_buffer[0] as f32,
-                                  1.0 - (y as f32 + offset.y) / self.frame_buffer[1] as f32);
-        point = 2.0 * point - 1.0;
-        let mut projPoint = Mat4::from_cols_array_2d(&self.inv_proj_matrix) * Vec4::new(point.x, point.y, 1.0, 1.0);
-        projPoint = projPoint / projPoint.w;
-        projPoint = projPoint.xyz().extend(0.0);
-
-        let mut origin = self.camera_data.position().xyz();
-
-        if self.camera_data.defocus_radius() > 0.0 {
-            offset = rngState.rngNextVec3InUnitDisk();
-
-            let pLens= (self.camera_data.defocus_radius() * offset).extend(1.0);
-            let mut lensOrigin = Mat4::from_cols_array_2d(&self.view_matrix) * pLens;
-            lensOrigin = lensOrigin / lensOrigin.w;
-            origin = lensOrigin.xyz();
-
-            let tf = self.camera_data.focus_distance() / projPoint.z;
-            projPoint = tf * projPoint - pLens;
-        }
-
-        let rayDir = Mat4::from_cols_array_2d(&self.view_matrix) * projPoint.with_w(0.0);
-        let direction = rayDir.xyz().normalize();
-
-        Ray { origin, direction }
-    }
-
-    fn getScatterRay_parallel(&self, inRay: Ray,
-                     mat_idx: u32,
-                     hit: HitPayload, rngState: &mut GPURNG)
-                     -> Ray {
+    fn get_scatter_ray(&self, in_ray: Ray,
+                       mat_idx: u32,
+                       hit: HitPayload, rng_state: &mut GpuRng)
+                       -> Ray {
 
         let origin = hit.p;
         let mat_type: u32 = self.materials[mat_idx as usize].material_type();
@@ -404,43 +290,43 @@ impl ComputeShader {
 
         match mat_type {
             0 => {
-                let randomBounce= rngState.rngNextVec3InUnitSphere().normalize();
+                let random_bounce = rng_state.rngNextVec3InUnitSphere().normalize();
 
-                direction = hit.n + randomBounce;
+                direction = hit.n + random_bounce;
                 if direction.length() < 0.0001 {
                     direction = hit.n;
                 }
             }
             1 => {
-                let randomBounce= rngState.rngNextVec3InUnitSphere().normalize();
+                let random_bounce = rng_state.rngNextVec3InUnitSphere().normalize();
 
                 let fuzz: f32 = self.materials[mat_idx as usize].fuzz();
-                direction = self.reflect(inRay.direction, hit.n) + fuzz * randomBounce;
+                direction = self.reflect(in_ray.direction, hit.n) + fuzz * random_bounce;
             }
             2 => {
                 let refract_idx: f32 = self.materials[mat_idx as usize].refract_index();
                 let mut norm= hit.n.clone();
-                let uv = inRay.direction.normalize();
-                let mut cosTheta = norm.dot(-uv).min(1.0); // as uv represents incoming, -uv is outgoing direction
-                let mut etaOverEtaPrime: f32 = 0.0;
+                let uv = in_ray.direction.normalize();
+                let mut cos_theta = norm.dot(-uv).min(1.0); // as uv represents incoming, -uv is outgoing direction
+                let mut eta_over_eta_prime: f32 = 0.0;
 
-                if cosTheta >= 0.0 {
-                    etaOverEtaPrime = 1.0 / refract_idx;
+                if cos_theta >= 0.0 {
+                    eta_over_eta_prime = 1.0 / refract_idx;
                 } else {
-                    etaOverEtaPrime = refract_idx;
+                    eta_over_eta_prime = refract_idx;
                     norm *= -1.0;
-                    cosTheta *= -1.0;
+                    cos_theta *= -1.0;
                 }
 
-                let reflectance: f32 = self.schlick(cosTheta, etaOverEtaPrime);
-                let mut refractDirection = Vec3::ZERO;
-                let cond= rngState.rngNextFloat();
+                let reflectance: f32 = self.schlick(cos_theta, eta_over_eta_prime);
+                let mut refract_direction = Vec3::ZERO;
+                let cond= rng_state.rngNextFloat();
 
-                if self.refract(uv, norm, etaOverEtaPrime, &mut refractDirection) {
+                if self.refract(uv, norm, eta_over_eta_prime, &mut refract_direction) {
                     if reflectance > cond {
                         direction = self.reflect(uv, norm);
                     } else {
-                        direction = refractDirection;
+                        direction = refract_direction;
                     }
                 } else {
                     direction = self.reflect(uv, norm);
@@ -451,194 +337,23 @@ impl ComputeShader {
         Ray { origin, direction }
     }
 
-    fn getRay(&mut self, x: u32, y: u32) -> Ray {
-        let mut offset = self.rngState.rngNextVec3InUnitDisk();
-
-        let mut point = Vec2::new((x as f32 + offset.x) / self.frame_buffer[0] as f32,
-                                  1.0 - (y as f32 + offset.y) / self.frame_buffer[1] as f32);
-        point = 2.0 * point - 1.0;
-        let mut projPoint = Mat4::from_cols_array_2d(&self.inv_proj_matrix) * Vec4::new(point.x, point.y, 1.0, 1.0);
-        projPoint = projPoint / projPoint.w;
-        projPoint = projPoint.xyz().extend(0.0);
-
-        let mut origin = self.camera_data.position().xyz();
-
-        if self.camera_data.defocus_radius() > 0.0 {
-            offset = self.rngState.rngNextVec3InUnitDisk();
-
-            let pLens= (self.camera_data.defocus_radius() * offset).extend(1.0);
-            let mut lensOrigin = Mat4::from_cols_array_2d(&self.view_matrix) * pLens;
-            lensOrigin = lensOrigin / lensOrigin.w;
-            origin = lensOrigin.xyz();
-
-            let tf = self.camera_data.focus_distance() / projPoint.z;
-            projPoint = tf * projPoint - pLens;
-        }
-
-        let rayDir = Mat4::from_cols_array_2d(&self.view_matrix) * projPoint.with_w(0.0);
-        let direction = rayDir.xyz().normalize();
-
-        Ray { origin, direction }
-    }
-
-    fn getScatterRay(&mut self, inRay: Ray,
-                     mat_idx: u32,
-                     hit: HitPayload)
-        -> Ray {
-
-        let origin = hit.p;
-        let mat_type: u32 = self.materials[mat_idx as usize].material_type();
-        let mut direction = Vec3::ZERO;
-
-        match mat_type {
-            0 => {
-                let randomBounce= self.rngState.rngNextVec3InUnitSphere().normalize();
-
-                direction = hit.n + randomBounce;
-                if direction.length() < 0.0001 {
-                    direction = hit.n;
-                }
-            }
-            1 => {
-                let randomBounce= self.rngState.rngNextVec3InUnitSphere().normalize();
-
-                let fuzz: f32 = self.materials[mat_idx as usize].fuzz();
-                direction = self.reflect(inRay.direction, hit.n) + fuzz * randomBounce;
-            }
-            2 => {
-                let refract_idx: f32 = self.materials[mat_idx as usize].refract_index();
-                let mut norm= hit.n.clone();
-                let uv = inRay.direction.normalize();
-                let mut cosTheta = norm.dot(-uv).min(1.0); // as uv represents incoming, -uv is outgoing direction
-                let mut etaOverEtaPrime: f32 = 0.0;
-
-                if cosTheta >= 0.0 {
-                    etaOverEtaPrime = 1.0 / refract_idx;
-                } else {
-                    etaOverEtaPrime = refract_idx;
-                    norm *= -1.0;
-                    cosTheta *= -1.0;
-                }
-
-                let reflectance: f32 = self.schlick(cosTheta, etaOverEtaPrime);
-                let mut refractDirection = Vec3::ZERO;
-                let cond= self.rngState.rngNextFloat();
-
-                if self.refract(uv, norm, etaOverEtaPrime, &mut refractDirection) {
-                       if reflectance > cond {
-                           direction = self.reflect(uv, norm);
-                       } else {
-                            direction = refractDirection;
-                        }
-                } else {
-                    direction = self.reflect(uv, norm);
-                }
-            }
-            _ => {}
-    }
-        Ray { origin, direction }
-    }
-
-    fn schlick(&self, cosine: f32, refractionIndex: f32) -> f32 {
-        let mut r0 = (1f32 - refractionIndex) / (1f32 + refractionIndex);
+    fn schlick(&self, cosine: f32, refraction_index: f32) -> f32 {
+        let mut r0 = (1f32 - refraction_index) / (1f32 + refraction_index);
         r0 = r0 * r0;
-        return r0 + (1f32 - r0) * (1f32 - cosine).powi(5)
+        r0 + (1f32 - r0) * (1f32 - cosine).powi(5)
     }
 
     fn reflect(&self, r: Vec3, n: Vec3) -> Vec3 {
-        return r - 2.0 * r.dot(n) * n;
+        r - 2.0 * r.dot(n) * n
     }
 
     fn refract(&self, uv: Vec3, n: Vec3, ri: f32, dir: &mut Vec3) -> bool {
-        let cosTheta: f32 = uv.dot(n);
-        let k: f32 = 1.0 - ri * ri * (1.0 - cosTheta * cosTheta);
+        let cos_theta: f32 = uv.dot(n);
+        let k: f32 = 1.0 - ri * ri * (1.0 - cos_theta * cos_theta);
         if k >= 0.0 {
-            *dir = ri * uv - (ri * cosTheta + k.sqrt()) * n;
+            *dir = ri * uv - (ri * cos_theta + k.sqrt()) * n;
             return true;
         }
-        return false;
-    }
-}
-
-#[derive(Default)]
-struct GPURNG {
-    state: u32,
-}
-
-impl GPURNG {
-    fn initRng(pixel: UVec2, resolution: (usize, usize), frame: u32) -> Self {
-        // the pixel.dot is a fancy way of taking the (i,j) point and converting it to the index
-        // jenkinsHash is probably unnecessary
-        let seed = pixel.dot(UVec2::new(1, resolution.0 as u32)) ^ Self::jenkinsHash(frame);
-        Self { state: Self::jenkinsHash(seed) }
-    }
-
-
-    fn rngNextInUnitHemisphere(&mut self) -> Vec3 {
-        let r1 = self.rngNextFloat();
-        let r2 = self.rngNextFloat();
-
-        let phi = 2.0 * PI * r1;
-        let sinTheta = (1.0 - r2 * r2).sqrt();
-
-        let x = phi.cos() * sinTheta;
-        let y = phi.sin() * sinTheta;
-        let z = r2;
-
-        Vec3::new(x, y, z)
-    }
-
-    fn rngNextVec3InUnitDisk(&mut self) -> Vec3 {
-        // r^2 is distributed as U(0, 1).
-        let r = self.rngNextFloat().sqrt();
-        let alpha = 2.0 * PI * self.rngNextFloat();
-
-        let x = r * alpha.cos();
-        let y = r * alpha.sin();
-
-        Vec3::new(x, y, 0.0)
-    }
-
-    pub fn rngNextVec3InUnitSphere(&mut self) -> Vec3 {
-        // probability density is uniformly distributed over r^3
-        let r = self.rngNextFloat().powf(0.33333f32);
-        let cos_theta = 2.0 * self.rngNextFloat() - 1.0;
-        let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
-        let phi = 2.0 * PI * self.rngNextFloat();
-
-        let x = r * sin_theta * phi.cos();
-        let y = r * sin_theta * phi.sin();
-        let z = r * cos_theta;
-
-        Vec3::new(x, y, z)
-    }
-
-    pub fn rngNextUintInRange(&mut self, min: u32, max: u32) -> u32 {
-        self.rngNextInt();
-        return min + (self.state) % (max - min);
-    }
-
-    pub fn rngNextFloat(&mut self) -> f32 {
-        self.rngNextInt();
-        return self.state as f32 * 2.3283064365387e-10;
-    }
-
-    pub fn rngNextInt(&mut self) {
-        // PCG hash RXS-M-XS
-        let oldState = (self.state.wrapping_mul(747796405)).wrapping_add(2891336453); // LCG
-        let word = ((oldState >> ((oldState >> 28) + 4)) ^ oldState).wrapping_mul(277803737); // RXS-M
-        self.state = (word >> 22) ^ word; // XS
-    }
-
-    fn jenkinsHash(input: u32) -> u32 {
-        let mut x = input;
-
-        x = x.wrapping_add(x.wrapping_shl(10));
-        x ^= x >> 6;
-        x = x.wrapping_add(x.wrapping_shl(3));
-        x ^= x >> 11;
-        x = x.wrapping_add(x.wrapping_shl(15));
-
-        x
+        false
     }
 }

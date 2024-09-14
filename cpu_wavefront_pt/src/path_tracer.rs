@@ -1,6 +1,6 @@
 use crate::bvh::BVHTree;
 use crate::compute_shader::ComputeShader;
-use crate::gpu_buffer::GPUBuffer;
+use crate::gpu_buffer::GPUStorageBuffer;
 use crate::gpu_structs::{GPUSamplingParameters};
 use crate::gui::GUI;
 use crate::parameters::{RenderParameters, RenderProgress};
@@ -12,8 +12,8 @@ use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, BufferAddr
 use winit::event::WindowEvent;
 
 pub struct PathTracer {
-    image_buffer: GPUBuffer,
-    frame_buffer: GPUBuffer,
+    image_buffer: GPUStorageBuffer,
+    frame_buffer: GPUStorageBuffer,
     camera_buffer: GPUCamera,
     sampling_parameters_buffer: GPUSamplingParameters,
     projection_buffer: [[f32;4];4],
@@ -37,18 +37,18 @@ impl PathTracer {
         // we make this array as big as the largest possible window on resize
         let image = vec![[0.0f32; 3]; max_window_size as usize];
         let image_buffer =
-            GPUBuffer::new_from_bytes(device,
-                                      BufferUsages::STORAGE,
-                                      0u32,
-                                      bytemuck::cast_slice(image.as_slice()),
-                                      Some("image buffer"));
+            GPUStorageBuffer::new_from_bytes(device,
+                                             BufferUsages::STORAGE,
+                                             0u32,
+                                             bytemuck::cast_slice(image.as_slice()),
+                                             Some("image buffer"));
 
         // create the frame_buffer
-        let frame_buffer = GPUBuffer::new(device,
-                                          BufferUsages::UNIFORM,
-                                          16 as BufferAddress,
-                                          1u32,
-                                          Some("frame buffer"));
+        let frame_buffer = GPUStorageBuffer::new(device,
+                                                 BufferUsages::UNIFORM,
+                                                 16 as BufferAddress,
+                                                 1u32,
+                                                 Some("frame buffer"));
 
         // group image and frame buffers into image bind group
         // for the display shader
@@ -184,47 +184,7 @@ impl PathTracer {
 
     }
 
-    pub fn progress(&self) -> f32 {
-        self.render_progress.progress()
-    }
 
-    pub fn input(&mut self, _event: &WindowEvent) -> bool {
-        false
-    }
-
-    pub fn get_render_parameters(&self) -> RenderParameters {
-        self.render_parameters.clone()
-    }
-
-    pub fn update_render_parameters(&mut self, render_parameters: RenderParameters) {
-        self.render_parameters = render_parameters
-    }
-
-    pub fn update_buffers(&mut self, _queue: &Queue) {
-        // if rp is the same as the stored buffer, no need to do anything
-        if self.render_parameters == self.last_render_parameters {
-            return;
-        }
-
-        let camera_controller = self.render_parameters.camera_controller();
-        // update the projection matrix
-        let (w,h) = self.render_parameters.get_viewport();
-        let ar = w as f32 / h as f32;
-        let (z_near, z_far) = camera_controller.get_clip_planes();
-        self.projection_buffer = ProjectionMatrix::new(camera_controller.vfov_rad(), ar, z_near, z_far).p_inv();
-
-        // update the view matrix
-        self.view_buffer = camera_controller.get_view_matrix();
-
-        // update the camera
-        self.camera_buffer = camera_controller.get_GPU_camera();
-
-        self.compute_shader.queue_camera(self.camera_buffer);
-        self.compute_shader.queue_proj(self.projection_buffer);
-        self.compute_shader.queue_view(self.view_buffer);
-
-        self.render_progress.reset();
-    }
 
     pub fn run_compute_kernel(&mut self, _device: &Device, queue: &Queue) { //, queries: &mut Queries) {
         let size = self.render_parameters.get_viewport();
@@ -246,47 +206,5 @@ impl PathTracer {
         self.compute_shader.run_parallel_render(queue, size, &mut self.image_buffer);
     }
 
-    pub fn run_display_kernel(&mut self, surface: &mut Surface,
-                              device: &Device, queue: &Queue, gui: &mut GUI) {
-        // on cpu version there is no compute kernel frame buffer so we have to update it here
-        let (width, height) = self.render_parameters.get_viewport();
-        let frame = self.render_progress.get(width, height);
-        self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
 
-        let output = surface.get_current_texture().unwrap();
-        let view = output.texture.create_view(
-            &wgpu::TextureViewDescriptor::default());
-
-        let mut encoder = device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor {
-                label: Some("display kernel encoder"),
-            });
-
-        {
-            let mut display_pass = encoder.begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: Some("display render Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    occlusion_query_set: None,
-                    timestamp_writes: None
-                });
-            display_pass.set_pipeline(&self.display_pipeline);
-            display_pass.set_bind_group(0, &self.display_bind_group, &[]);
-            display_pass.draw(0..6, 0..1);
-
-            gui.imgui_renderer.render(
-                gui.imgui.render(), queue, device, &mut display_pass
-            ).expect("failed to render gui");
-        }
-        queue.submit(Some(encoder.finish()));
-        output.present();
-    }
 }

@@ -4,8 +4,8 @@ use wgpu::util::{BufferInitDescriptor, DeviceExt};
 pub struct GPUBuffer {
     name: Buffer,
     usage: BufferUsages,
-    binding_idx: u32,
 }
+
 
 impl GPUBuffer {
     pub fn new(device: &Device, usage: BufferUsages, size: BufferAddress, binding_idx: u32, label: Option<&str>)
@@ -19,13 +19,11 @@ impl GPUBuffer {
         Self {
             name: buffer,
             usage,
-            binding_idx
         }
     }
 
     pub fn new_from_bytes(device: &Device,
                           usage: BufferUsages,
-                          binding_idx: u32,
                           data: &[u8],
                           label: Option<&str>) -> Self {
         let buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -36,7 +34,6 @@ impl GPUBuffer {
         Self {
             name: buffer,
             usage,
-            binding_idx
         }
     }
 
@@ -49,7 +46,7 @@ impl GPUBuffer {
     }
 
 
-    pub fn layout(&self, visibility: ShaderStages, read_only: bool) -> BindGroupLayoutEntry {
+    pub fn layout(&self, visibility: ShaderStages, binding_idx: u32, read_only: bool) -> BindGroupLayoutEntry {
         let mut buffer_binding_type: BufferBindingType = Default::default();
         match self.usage {
             BufferUsages::STORAGE => {
@@ -61,7 +58,7 @@ impl GPUBuffer {
             _ => {}
         }
         BindGroupLayoutEntry {
-            binding: self.binding_idx,
+            binding: binding_idx,
             visibility,
             ty: BindingType::Buffer {
                 ty: buffer_binding_type,
@@ -72,9 +69,9 @@ impl GPUBuffer {
         }
     }
 
-    pub fn binding(&self) -> BindGroupEntry<'_> {
+    pub fn binding(&self, binding_idx: u32) -> BindGroupEntry<'_> {
         BindGroupEntry {
-            binding: self.binding_idx,
+            binding: binding_idx,
             resource: self.name.as_entire_binding(),
         }
     }

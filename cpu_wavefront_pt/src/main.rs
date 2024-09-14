@@ -1,7 +1,13 @@
 mod app;
 mod path_tracer;
 mod compute_shader;
+mod ray_gen_shader;
+mod gpu_rng;
+mod wavefront_path_integrator;
+mod ray;
+mod gpu;
 
+use std::sync::Arc;
 use wavefront_common::bvh;
 use wavefront_common::camera::Camera;
 use wavefront_common::camera_controller::CameraController;
@@ -18,7 +24,8 @@ use glam::Vec3;
 use crate::app::App;
 use wavefront_common::scene::Scene;
 use winit::error::EventLoopError;
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::window::Window;
 
 fn main() -> Result<(), EventLoopError> {
     env_logger::init();
@@ -45,6 +52,7 @@ fn main() -> Result<(), EventLoopError> {
     let render_parameters = RenderParameters::new(camera_controller, sampling_parameters, screen_size);
 
     let event_loop = EventLoop::new()?;
+
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::new(scene, render_parameters);
     event_loop.run_app(&mut app)

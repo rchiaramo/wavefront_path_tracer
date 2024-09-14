@@ -1,9 +1,5 @@
 use crate::gui::GUI;
-use crate::path_tracer::PathTracer;
-use wavefront_common::camera_controller::CameraController;
-use wavefront_common::gpu_structs::{GPUSamplingParameters};
 use wavefront_common::parameters::RenderParameters;
-use wavefront_common::projection_matrix::ProjectionMatrix;
 use wavefront_common::scene::Scene;
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,13 +9,12 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 use wavefront_common::frames_per_second::FramesPerSecond;
+use crate::wavefront_path_integrator::WavefrontPathIntegrator;
 
 pub struct App<'a> {
     window: Option<Arc<Window>>,
-    wgpu_state: Option<WgpuState<'a>>,
-    path_tracer: Option<PathTracer>,
+    wavefront_path_tracer: Option<WavefrontPathIntegrator<'a>>,
     gui: Option<GUI>,
-    cursor_position: winit::dpi::PhysicalPosition<f64>,
     scene: Scene,
     render_parameters: RenderParameters,
     last_render_time: Instant,
@@ -30,10 +25,8 @@ impl<'a> App<'a> {
     pub fn new(scene: Scene, render_parameters: RenderParameters) -> Self {
         Self {
             window: None,
-            wgpu_state: None,
-            path_tracer: None,
+            wavefront_path_tracer: None,
             gui: None,
-            cursor_position: Default::default(),
             scene,
             render_parameters,
             last_render_time: Instant::now(),
@@ -53,8 +46,6 @@ impl ApplicationHandler for App<'_> {
                 event_loop.create_window(win_attr).unwrap());
             self.window = Some(window.clone());
 
-            self.wgpu_state = WgpuState::new(window.clone());
-
             let max_viewport_resolution = window
                 .available_monitors()
                 .map(|monitor| -> u32 {
@@ -65,15 +56,15 @@ impl ApplicationHandler for App<'_> {
                 .max()
                 .expect("must have at least one monitor");
 
-            if let Some(state) = &self.wgpu_state {
-                self.path_tracer =
-                    PathTracer::new(&state.device,
-                                    max_viewport_resolution,
-                                    size,
-                                    &mut self.scene,
-                                    &self.render_parameters);
-                self.gui = GUI::new(&window, &state.surface_config, &state.device, &state.queue);
-            }
+            let wavefront_path_tracer =
+                WavefrontPathIntegrator::new(window.clone(),
+                                max_viewport_resolution,
+                                &mut self.scene,
+                                &self.render_parameters);
+
+            let wgpu_state = wavefront_path_tracer.wgpu_state();
+            self.gui = GUI::new(&window, wgpu_state);
+            self.wavefront_path_tracer = Some(wavefront_path_tracer);
         }
     }
 
@@ -82,11 +73,9 @@ impl ApplicationHandler for App<'_> {
         let window = self.window.as_ref().unwrap();
         if window.id() != window_id { return; }
 
-        let path_tracer = self.path_tracer.as_mut().unwrap();
-        let state = self.wgpu_state.as_mut().unwrap();
+        let path_tracer = self.wavefront_path_tracer.as_mut().unwrap();
         let gui = self.gui.as_mut().unwrap();
         let mut rp = path_tracer.get_render_parameters();
-
 
         if !path_tracer.input(&event) {
             match event {
@@ -104,20 +93,8 @@ impl ApplicationHandler for App<'_> {
                 WindowEvent::Resized(new_size) => {
                     let (width, height) = (new_size.width, new_size.height);
                     rp.set_viewport((width, height));
-                    state.resize((width, height));
+                    path_tracer.wgpu_state().resize((width, height));
                     path_tracer.update_render_parameters(rp);
-                }
-
-                WindowEvent::CursorMoved { position, ..} => {
-                    self.cursor_position = position;
-                }
-
-                // state below is NOT wgpu state as declared above
-                WindowEvent::MouseInput { state, ..
-                } => {
-                    if state.is_pressed() {
-                        println!("cursor position {:?}", self.cursor_position);
-                    }
                 }
 
                 WindowEvent::RedrawRequested => {
@@ -129,14 +106,9 @@ impl ApplicationHandler for App<'_> {
 
                     gui.display_ui(window.as_ref(), path_tracer.progress(), & mut rp, avg_fps, 0.0, dt);
                     path_tracer.update_render_parameters(rp);
-                    path_tracer.update_buffers(&state.queue);
-                    path_tracer.run_compute_kernel(&state.device, &state.queue);
-                    path_tracer.run_display_kernel(
-                        &mut state.surface,
-                        &state.device,
-                        &state.queue,
-                        gui
-                    );
+                    path_tracer.update_buffers();
+                    path_tracer.run_compute_kernel();
+                    path_tracer.run_display_kernel(gui);
                 }
                 
                 _ => {}
@@ -144,83 +116,5 @@ impl ApplicationHandler for App<'_> {
         }
         gui.platform.handle_event(gui.imgui.io_mut(), &window, window_id, &event);
         window.request_redraw();
-    }
-}
-
-pub struct WgpuState<'a> {
-    surface: wgpu::Surface<'a>,
-    surface_config: wgpu::SurfaceConfiguration,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-}
-
-impl<'a> WgpuState<'a> {
-    pub fn new(window: Arc<Window>) -> Option<WgpuState<'a>> {
-        pollster::block_on(WgpuState::new_async(window))
-    }
-
-    async fn new_async(window: Arc<Window>) -> Option<WgpuState<'a>> {
-        let size = {
-            let viewport = window.inner_size();
-            (viewport.width, viewport.height)
-        };
-
-        let instance = wgpu::Instance::new(
-            wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::PRIMARY,
-                ..Default::default()
-            }
-        );
-
-        let surface = instance.create_surface(
-            Arc::clone(&window)).unwrap();
-
-        let adapter = instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            }
-        ).await?;
-
-        let (device, queue) = adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits {
-                    max_storage_buffer_binding_size: 512_u32 << 20,
-                    ..Default::default()
-                },
-                label: None,
-                memory_hints: Default::default(),
-            },
-            None,
-        ).await.unwrap();
-
-        let surface_capabilities = surface.get_capabilities(&adapter);
-
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: wgpu::TextureFormat::Bgra8Unorm,
-            width: size.0,
-            height: size.1,
-            present_mode: surface_capabilities.present_modes[0],
-            alpha_mode: surface_capabilities.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 1,
-        };
-
-        Some(Self {
-            surface,
-            surface_config,
-            device,
-            queue,
-        })
-    }
-
-    fn resize(&mut self, new_size: (u32, u32))
-    {
-        self.surface_config.width = new_size.0;
-        self.surface_config.height = new_size.1;
-        self.surface.configure(&self.device, &self.surface_config);
     }
 }

@@ -1,6 +1,9 @@
 mod app;
 mod path_tracer;
 mod query_gpu;
+mod generate_ray;
+mod compute_rest;
+mod display;
 
 use glam::Vec3;
 use winit::error::EventLoopError;

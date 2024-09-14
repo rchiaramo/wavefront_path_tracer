@@ -5,6 +5,7 @@ use imgui_winit_support::WinitPlatform;
 use wgpu::{Queue, SurfaceConfiguration};
 use winit::window::Window;
 use crate::parameters::RenderParameters;
+use crate::wgpu_state::WgpuState;
 
 pub struct GUI {
     pub platform: WinitPlatform,
@@ -14,8 +15,7 @@ pub struct GUI {
 }
 
 impl GUI {
-    pub fn new(window: &Window, surface_cap: &SurfaceConfiguration,
-               device: &wgpu::Device, queue: &Queue)
+    pub fn new(window: &Window, wgpu: &WgpuState)
         -> Option<Self> {
 
         let mut imgui = imgui::Context::create();
@@ -41,11 +41,12 @@ impl GUI {
         }]);
 
         let renderer_config = RendererConfig {
-            texture_format: surface_cap.format,
+            texture_format: wgpu.surface_config().format,
             ..Default::default()
         };
 
-        let mut imgui_renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
+        let mut imgui_renderer
+            = Renderer::new(&mut imgui, &wgpu.device(), &wgpu.queue(), renderer_config);
 
         Some(Self {
             platform,
