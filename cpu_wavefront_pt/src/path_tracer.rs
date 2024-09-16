@@ -111,12 +111,7 @@ impl PathTracer {
                                                 camera_buffer,
                                                 projection_buffer,
                                                 view_buffer,
-                                                gpu_sampling_parameters_buffer,
-                                                GPUFrameBuffer::new(window_size.0,
-                                                                    window_size.1,
-                                                                    1,
-                                                                    0),
-                                                max_window_size);
+                                                gpu_sampling_parameters_buffer);
 
         let shader = device.create_shader_module(
             wgpu::include_wgsl!("../../wavefront_common/shaders/display_shader.wgsl")

@@ -56,7 +56,7 @@ struct FrameBuffer {
     width: u32,
     height: u32,
     frame: u32,
-    accumulated_samples: u32
+    sample_number: u32
 }
 
 const STACKSIZE:u32 = 10;
@@ -80,7 +80,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     // load the stored pixel color
     var pixel_color: vec3f = vec3f(image_buffer[idx][0], image_buffer[idx][1], image_buffer[idx][2]);
     var rng_state:u32 = init_rng(screen_pos, image_size, frame_buffer.frame);
-    advance(&rng_state, 120u);
+    advance(&rng_state, frame_buffer.sample_number);
 
     if (sampling_parameters.clear_image_buffer == 1) {
         pixel_color = vec3f(0.0, 0.0, 0.0);

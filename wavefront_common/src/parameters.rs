@@ -80,7 +80,7 @@ impl RenderProgress {
     }
 
     pub fn get(&self, width: u32, height: u32) -> GPUFrameBuffer {
-        GPUFrameBuffer::new(width, height, self.frame, self.accumulated_samples)
+        GPUFrameBuffer::new(width, height, self.frame)
     }
 
     pub fn current_frame(&self) -> u32 {
@@ -148,11 +148,15 @@ impl RenderProgress {
             accumulated_samples = updated_progress;
         }
 
-        GPUFrameBuffer::new(width, height, frame, accumulated_samples)
+        GPUFrameBuffer::new(width, height, frame)
     }
 
     pub fn progress(&self) -> f32 {
         self.accumulated_samples as f32 / self.samples_per_pixel as f32
+    }
+
+    pub fn accumulated_samples(&self) -> u32 {
+        self.accumulated_samples
     }
 }
 

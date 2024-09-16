@@ -35,19 +35,23 @@ pub struct GPUFrameBuffer {
     width: u32,
     height: u32,
     frame: u32,
-    accumulated_samples: u32
+    sample_number: u32
 }
 
 impl GPUFrameBuffer {
-    pub fn new(width: u32, height: u32, frame: u32, accumulated_samples: u32) -> Self {
+    pub fn new(width: u32, height: u32, frame: u32) -> Self {
         Self {
             width,
             height,
             frame,
-            accumulated_samples
+            sample_number: 0
         }
     }
     pub fn into_array(&self) -> [u32; 4] {
-        [self.width, self.height, self.frame, self.accumulated_samples]
+        [self.width, self.height, self.frame, self.sample_number]
+    }
+
+    pub fn set_sample_number(&mut self, sample_number: u32) {
+        self.sample_number = sample_number;
     }
 }

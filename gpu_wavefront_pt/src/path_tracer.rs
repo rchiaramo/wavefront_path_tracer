@@ -231,11 +231,13 @@ impl<'a> PathTracer<'a> {
         self.update_buffers();
 
         // always update the frame
-        let frame = self.render_progress.get_next_frame(&mut self.render_parameters);
-        for i in 0..self.render_parameters.sampling_parameters().samples_per_frame {
+        let mut frame = self.render_progress.get_next_frame(&mut self.render_parameters);
+        for sample_number in 0..self.render_parameters.sampling_parameters().samples_per_frame {
             {
                 let device = self.wgpu_state.device();
                 let queue = self.wgpu_state.queue();
+
+                frame.set_sample_number(sample_number);
                 self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
 
                 let (width, height) = self.render_parameters.get_viewport();
@@ -255,6 +257,13 @@ impl<'a> PathTracer<'a> {
                 let mut comp_queries = Queries::new(device, 2);
                 self.compute_rest_kernel.run(device, queue, (width, height), comp_queries);
             }
+        }
+        // sloppy solution right now, but I'm double using the sample_number for the display shader
+        // by storing the total accumulated samples in that variable
+        {
+            let queue = self.wgpu_state.queue();
+            frame.set_sample_number(self.render_progress.accumulated_samples());
+            self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
         }
         self.display_kernel.run(&mut self.wgpu_state);
     }

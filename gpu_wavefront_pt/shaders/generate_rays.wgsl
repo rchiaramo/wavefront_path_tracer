@@ -21,7 +21,7 @@ struct FrameBuffer {
     width: u32,
     height: u32,
     frame: u32,
-    accumulated_samples: u32
+    sample_number: u32
 }
 
 struct ProjectionBuffer {
@@ -46,7 +46,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let idx = id.x + id.y * width;
 
     var rng_state:u32 = init_rng(screen_pos, vec2(width, height), frame_buffer.frame);
-
+    advance(&rng_state, frame_buffer.sample_number);
+    
     var offset: vec3f = rng_next_vec3in_unit_disk(&rng_state);
     var ray: Ray;
 
