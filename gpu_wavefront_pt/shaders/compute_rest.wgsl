@@ -86,10 +86,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         pixel_color = vec3f(0.0, 0.0, 0.0);
     }
 
-    for (var i: u32 = 0; i < sampling_parameters.samples_per_frame; i++) {
-        var ray: Ray = ray_buffer[idx];
-        pixel_color += ray_color(ray, &rng_state);
-    }
+    var ray: Ray = ray_buffer[idx];
+    pixel_color += ray_color(ray, &rng_state);
 
     image_buffer[idx][0] = pixel_color.x;
     image_buffer[idx][1] = pixel_color.y;
@@ -398,11 +396,6 @@ fn rng_next_vec3in_unit_sphere(state: ptr<function, u32>) -> vec3<f32> {
     let z = r * cos_theta;
 
     return vec3(x, y, z);
-}
-
-fn rng_next_uint_in_range(state: ptr<function, u32>, min: u32, max: u32) -> u32 {
-    rng_next_int(state);
-    return min + (*state) % (max - min);
 }
 
 fn rng_next_float(state: ptr<function, u32>) -> f32 {
