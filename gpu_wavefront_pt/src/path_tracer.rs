@@ -5,7 +5,7 @@ use wavefront_common::bvh::BVHTree;
 use wavefront_common::gpu_buffer::GPUBuffer;
 use wavefront_common::gpu_structs::{GPUSamplingParameters};
 use wavefront_common::gui::GUI;
-use wavefront_common::parameters::{RenderParameters, RenderProgress};
+use wavefront_common::parameters::{RenderParameters, RenderProgress, SamplingParameters};
 use wavefront_common::projection_matrix::ProjectionMatrix;
 use wavefront_common::scene::Scene;
 use wavefront_common::ray::Ray;
@@ -32,7 +32,7 @@ pub struct PathTracer<'a> {
     compute_rest_kernel: ComputeRestKernel,
     display_kernel: DisplayKernel,
     render_parameters: RenderParameters,
-    last_render_parameters: RenderParameters,
+    sampling_parameters: SamplingParameters,
     render_progress: RenderProgress
 }
 
@@ -40,7 +40,8 @@ impl<'a> PathTracer<'a> {
     pub fn new(window: Arc<winit::window::Window>,
                max_window_size: u32,
                scene: &mut Scene,
-               rp: &RenderParameters)
+               rp: &RenderParameters,
+               sp: &SamplingParameters)
         -> Self {
         // create the connection to the GPU
         let wgpu_state = WgpuState::new(window);
@@ -88,14 +89,15 @@ impl<'a> PathTracer<'a> {
         // this will include the camera controller, the sampling parameters, and the window size
         let render_parameters= rp.clone();
         let camera_controller = render_parameters.camera_controller();
-        let (width, height) = render_parameters.get_viewport();
+        let (width, height) = render_parameters.viewport_size();
         let ar = width as f32 / height as f32;
         let (z_near, z_far) = camera_controller.get_clip_planes();
         let proj_mat = ProjectionMatrix::new(
             camera_controller.vfov_rad(), ar, z_near,z_far).p_inv();
         let view_mat = camera_controller.get_view_matrix();
+        let sampling_parameters = sp.clone();
         let gpu_sampling_params
-            = GPUSamplingParameters::get_gpu_sampling_params(render_parameters.sampling_parameters());
+            = GPUSamplingParameters::get_gpu_sampling_params(&sampling_parameters);
 
         let gpu_camera = camera_controller.get_GPU_camera();
 
@@ -119,12 +121,7 @@ impl<'a> PathTracer<'a> {
                                                            bytemuck::cast_slice(&[view_mat]),
                                                            Some("view buffer"));
 
-        let last_render_parameters = render_parameters.clone();
-
-        let spf = render_parameters.sampling_parameters().samples_per_frame;
-        let spp= render_parameters.sampling_parameters().samples_per_pixel;
-        let nb = render_parameters.sampling_parameters().num_bounces;
-        let render_progress = RenderProgress::new(spf, spp, nb);
+        let render_progress = RenderProgress::new();
 
         let generate_ray_kernel
             = GenerateRayKernel::new(device,
@@ -163,7 +160,7 @@ impl<'a> PathTracer<'a> {
             compute_rest_kernel,
             display_kernel,
             render_parameters,
-            last_render_parameters,
+            sampling_parameters,
             render_progress
         }
     }
@@ -173,7 +170,7 @@ impl<'a> PathTracer<'a> {
     }
 
     pub fn progress(&self) -> f32 {
-        self.render_progress.progress()
+        self.render_progress.progress(self.sampling_parameters.samples_per_pixel)
     }
 
     pub fn input(&mut self, _event: &WindowEvent) -> bool {
@@ -185,7 +182,7 @@ impl<'a> PathTracer<'a> {
     }
 
     pub fn resize(&mut self, rp: RenderParameters) {
-        self.wgpu_state.resize(rp.get_viewport());
+        self.wgpu_state.resize(rp.viewport_size());
         self.update_render_parameters(rp);
 
     }
@@ -196,35 +193,45 @@ impl<'a> PathTracer<'a> {
     pub fn update_buffers(&mut self) {
         let queue = self.wgpu_state.queue();
 
-        self.last_render_parameters = self.get_render_parameters();
+        // if nothing changed, no need to do anything
+        if !self.render_parameters.changed() {
+            let sampling_parameters = SamplingParameters::new(1,50, 0, 500);
+            let gpu_sampling_parameters
+                = GPUSamplingParameters::get_gpu_sampling_params(&sampling_parameters);
+            self.sampling_parameters_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[gpu_sampling_parameters]));
+            return;
+        }
 
+        // otherwise something changed
+        let sampling_parameters = SamplingParameters::new(1,50, 1, 500);
         let gpu_sampling_parameters
-            = GPUSamplingParameters::get_gpu_sampling_params(self.render_parameters.sampling_parameters());
+            = GPUSamplingParameters::get_gpu_sampling_params(&sampling_parameters);
         self.sampling_parameters_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[gpu_sampling_parameters]));
 
-        // if rp is the same as the stored buffer, no need to do anything
-        // if self.render_parameters == self.last_render_parameters {
-        //     return;
-        // }
-        //
-        // let camera_controller = self.render_parameters.camera_controller();
-        // // update the projection matrix
-        // let (w,h) = self.render_parameters.get_viewport();
-        // let ar = w as f32 / h as f32;
-        // let (z_near, z_far) = camera_controller.get_clip_planes();
-        // let proj_mat = ProjectionMatrix::new(camera_controller.vfov_rad(), ar, z_near, z_far).p_inv();
-        // self.projection_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[proj_mat]));
-        //
-        // // update the view matrix
-        // let view_mat = camera_controller.get_view_matrix();
-        // self.view_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[view_mat]));
-        //
-        // // update the camera
-        // let gpu_camera = self.render_parameters.camera_controller().get_GPU_camera();
-        // self.camera_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[gpu_camera]));
-        //
-        // self.last_render_parameters = self.get_render_parameters();
-        // self.render_progress.reset();
+        let camera_controller = self.render_parameters.camera_controller();
+
+        // if the camera position or orientation changed, update the view matrix and the camera itself
+        // if the window was resized or vfov altered, update the projection matrix
+        // right now, I'll just update both all the time
+
+        // update the view matrix
+        let view_mat = camera_controller.get_view_matrix();
+        self.view_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[view_mat]));
+
+        // update the camera
+        let gpu_camera = self.render_parameters.camera_controller().get_GPU_camera();
+        self.camera_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[gpu_camera]));
+
+        // update the projection matrix
+        let (w, h) = self.render_parameters.viewport_size();
+        let ar = w as f32 / h as f32;
+        let (z_near, z_far) = camera_controller.get_clip_planes();
+        let proj_mat = ProjectionMatrix::new(camera_controller.vfov_rad(), ar, z_near, z_far).p_inv();
+        self.projection_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[proj_mat]));
+
+        // reset all flags after changes made
+        self.render_parameters.reset();
+        self.render_progress.reset();
     }
 
     pub fn run(&mut self) {
@@ -232,7 +239,8 @@ impl<'a> PathTracer<'a> {
 
         // always update the frame
         let mut frame = self.render_progress.get_next_frame(&mut self.render_parameters);
-        for sample_number in 0..self.render_parameters.sampling_parameters().samples_per_frame {
+        let samples_per_frame = self.sampling_parameters.samples_per_frame;
+        for sample_number in 0..samples_per_frame {
             {
                 let device = self.wgpu_state.device();
                 let queue = self.wgpu_state.queue();
@@ -240,7 +248,7 @@ impl<'a> PathTracer<'a> {
                 frame.set_sample_number(sample_number);
                 self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
 
-                let (width, height) = self.render_parameters.get_viewport();
+                let (width, height) = self.render_parameters.viewport_size();
 
                 let mut gen_queries = Queries::new(device, 2);
 
@@ -256,15 +264,15 @@ impl<'a> PathTracer<'a> {
 
                 let mut comp_queries = Queries::new(device, 2);
                 self.compute_rest_kernel.run(device, queue, (width, height), comp_queries);
+                self.render_progress.incr_accumulated_samples(samples_per_frame);
             }
         }
         // sloppy solution right now, but I'm double using the sample_number for the display shader
         // by storing the total accumulated samples in that variable
-        {
-            let queue = self.wgpu_state.queue();
-            frame.set_sample_number(self.render_progress.accumulated_samples());
-            self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
-        }
+        let queue = self.wgpu_state.queue();
+        frame.set_sample_number(self.render_progress.accumulated_samples());
+        self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
+
         self.display_kernel.run(&mut self.wgpu_state);
     }
 }

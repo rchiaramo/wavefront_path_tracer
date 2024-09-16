@@ -4,7 +4,7 @@ use imgui_wgpu::{Renderer, RendererConfig};
 use imgui_winit_support::WinitPlatform;
 use wgpu::{Queue, SurfaceConfiguration};
 use winit::window::Window;
-use crate::parameters::RenderParameters;
+use crate::parameters::{RenderParameters, SamplingParameters};
 use crate::wgpu_state::WgpuState;
 
 pub struct GUI {
@@ -64,6 +64,10 @@ impl GUI {
         let mut fov = cc.vfov_rad().to_degrees();
         let (defocus_angle_rad, mut focus_distance) = cc.dof();
         let mut defocus_angle = defocus_angle_rad.to_degrees();
+
+        let mut samples_per_pixel = 0;
+        let mut samples_per_frame = 0;
+        let mut num_bounces = 0;
 
         {
             self.platform
@@ -160,21 +164,21 @@ impl GUI {
                             "Samples per frame",
                             1,
                             10,
-                            &mut rp.sampling_parameters.samples_per_frame,
+                            &mut samples_per_frame,
                         );
 
                         ui.slider(
                             "Samples per pixel",
                             10,
                             1000,
-                            &mut rp.sampling_parameters.samples_per_pixel,
+                            &mut samples_per_pixel,
                         );
 
                         ui.slider(
                             "num bounces",
                             5,
                             100,
-                            &mut rp.sampling_parameters.num_bounces,
+                            &mut num_bounces,
                         );
                     });
             }

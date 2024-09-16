@@ -34,14 +34,14 @@ fn main() -> Result<(), EventLoopError> {
     let screen_size = (2880, 1620); // (1920, 1080) (3840, 2160)
     let sampling_parameters = SamplingParameters::new(2,
                                                       50,
-                                                      1,
+                                                      0,
                                                       500);
     let render_parameters
-        = RenderParameters::new(camera_controller, sampling_parameters, screen_size);
+        = RenderParameters::new(camera_controller, screen_size);
     
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::new(scene, render_parameters);
+    let mut app = App::new(scene, render_parameters, sampling_parameters);
     event_loop.run_app(&mut app)
 }

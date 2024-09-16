@@ -106,7 +106,7 @@ impl<'a> WavefrontPathIntegrator<'a> {
         // this will include the camera, and the sampling parameters
         let render_parameters = rp.clone();
         let camera_controller = render_parameters.camera_controller();
-        let (width, height) = render_parameters.get_viewport();
+        let (width, height) = render_parameters.viewport_size();
         let ar = width as f32 / height as f32;
         let (z_near, z_far) = camera_controller.get_clip_planes();
         let projection_buffer = ProjectionMatrix::new(
@@ -217,7 +217,7 @@ impl<'a> WavefrontPathIntegrator<'a> {
     }
 
     pub fn render(&mut self) {
-        let (width, height) = self.render_parameters.get_viewport();
+        let (width, height) = self.render_parameters.viewport_size();
         let mut wavefront_depth = 0;
         // fundamental rendering loop
         for sample_index in 0..self.samples_per_frame {
@@ -260,7 +260,7 @@ impl<'a> WavefrontPathIntegrator<'a> {
     pub fn run_display_kernel(&mut self, gui: &mut GUI)
     {
         // on cpu version there is no compute kernel frame buffer so we have to update it here
-        let (width, height) = self.render_parameters.get_viewport();
+        let (width, height) = self.render_parameters.viewport_size();
         let frame = self.render_progress.get(width, height);
         self.frame_buffer.queue_for_gpu(self.wgpu_state.queue(), bytemuck::cast_slice(&[frame]));
 
@@ -325,7 +325,7 @@ impl<'a> WavefrontPathIntegrator<'a> {
 
         let camera_controller = self.render_parameters.camera_controller();
         // update the projection matrix
-        let (w,h) = self.render_parameters.get_viewport();
+        let (w,h) = self.render_parameters.viewport_size();
         let ar = w as f32 / h as f32;
         let (z_near, z_far) = camera_controller.get_clip_planes();
         self.projection_buffer = ProjectionMatrix::new(camera_controller.vfov_rad(), ar, z_near, z_far).p_inv();

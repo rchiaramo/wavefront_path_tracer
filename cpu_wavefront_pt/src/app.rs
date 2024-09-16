@@ -37,7 +37,7 @@ impl<'a> App<'a> {
 
 impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let size = self.render_parameters.get_viewport();
+        let size = self.render_parameters.viewport_size();
         if self.window.is_none() {
             let win_attr = Window::default_attributes()
                 .with_inner_size(winit::dpi::PhysicalSize::new(size.0, size.1))

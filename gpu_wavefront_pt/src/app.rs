@@ -9,7 +9,7 @@ use winit::event_loop::{ActiveEventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 use wavefront_common::frames_per_second::FramesPerSecond;
-use wavefront_common::parameters::RenderParameters;
+use wavefront_common::parameters::{RenderParameters, SamplingParameters};
 use wavefront_common::scene::Scene;
 use wavefront_common::gui::GUI;
 use wavefront_common::wgpu_state::WgpuState;
@@ -21,18 +21,20 @@ pub struct App<'a> {
     gui: Option<GUI>,
     scene: Scene,
     render_parameters: RenderParameters,
+    sampling_parameters: SamplingParameters,
     last_render_time: Instant,
     frames_per_second: FramesPerSecond,
 }
 
 impl<'a> App<'a> {
-    pub fn new(scene: Scene, render_parameters: RenderParameters) -> Self {
+    pub fn new(scene: Scene, render_parameters: RenderParameters, sampling_parameters: SamplingParameters) -> Self {
         Self {
             window: None,
             path_tracer: None,
             gui: None,
             scene,
             render_parameters,
+            sampling_parameters,
             last_render_time: Instant::now(),
             frames_per_second: FramesPerSecond::new()
         }
@@ -41,7 +43,7 @@ impl<'a> App<'a> {
 
 impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let size = self.render_parameters.get_viewport();
+        let size = self.render_parameters.viewport_size();
         if self.window.is_none() {
             let win_attr = Window::default_attributes()
                 .with_inner_size(winit::dpi::PhysicalSize::new(size.0, size.1))
@@ -64,7 +66,9 @@ impl ApplicationHandler for App<'_> {
                 window.clone(),
                 max_viewport_resolution,
                 &mut self.scene,
-                &self.render_parameters);
+                &self.render_parameters,
+                &self.sampling_parameters
+            );
 
             // let wgpu_state  = path_tracer.wgpu_state();
             // self.gui = GUI::new(&window, wgpu_state);

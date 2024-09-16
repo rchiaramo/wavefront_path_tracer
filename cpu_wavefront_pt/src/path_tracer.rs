@@ -85,7 +85,7 @@ impl PathTracer {
         // this will include the camera, and the sampling parameters
         let render_parameters= rp.clone();
         let camera_controller = render_parameters.camera_controller();
-        let (width, height) = render_parameters.get_viewport();
+        let (width, height) = render_parameters.viewport_size();
         let ar = width as f32 / height as f32;
         let (z_near, z_far) = camera_controller.get_clip_planes();
         let projection_buffer = ProjectionMatrix::new(
@@ -182,7 +182,7 @@ impl PathTracer {
 
 
     pub fn run_compute_kernel(&mut self, _device: &Device, queue: &Queue) { //, queries: &mut Queries) {
-        let size = self.render_parameters.get_viewport();
+        let size = self.render_parameters.viewport_size();
 
         // on cpu version, all compute kernel buffers have to be "queued" by copying them to the
         // compute_shader structure
