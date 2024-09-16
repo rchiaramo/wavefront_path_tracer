@@ -80,6 +80,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     // load the stored pixel color
     var pixel_color: vec3f = vec3f(image_buffer[idx][0], image_buffer[idx][1], image_buffer[idx][2]);
     var rng_state:u32 = init_rng(screen_pos, image_size, frame_buffer.frame);
+    advance(&rng_state, 120u);
 
     if (sampling_parameters.clear_image_buffer == 1) {
         pixel_color = vec3f(0.0, 0.0, 0.0);
@@ -405,8 +406,8 @@ fn rng_next_uint_in_range(state: ptr<function, u32>, min: u32, max: u32) -> u32 
 }
 
 fn rng_next_float(state: ptr<function, u32>) -> f32 {
-    rng_next_int(state);
-    return f32(*state) * 2.3283064365387e-10f;  // / f32(0xffffffffu - 1f);
+    let x = rng_next_int(state);
+    return f32(x) * 2.3283064365387e-10f;  // / f32(0xffffffffu - 1f);
 }
 
 fn init_rng(pixel: vec2<u32>, resolution: vec2<u32>, frame: u32) -> u32 {
@@ -414,11 +415,30 @@ fn init_rng(pixel: vec2<u32>, resolution: vec2<u32>, frame: u32) -> u32 {
     return jenkins_hash(seed);
 }
 
-fn rng_next_int(state: ptr<function, u32>) {
+fn rng_next_int(state: ptr<function, u32>) -> u32 {
     // PCG hash RXS-M-XS
-    let old_state = *state + 747796405u + 2891336453u;
+    let old_state = *state * 747796405u + 2891336453u;
+    *state = old_state;
     let word = ((old_state >> ((old_state >> 28u) + 4u)) ^ old_state) * 277803737u;
-    *state = (word >> 22u) ^ word;
+    return (word >> 22u) ^ word;
+}
+
+fn advance(state: ptr<function, u32>, advance_by: u32) {
+    var acc_mult = 1u;
+    var acc_plus = 0u;
+    var cur_mult = 747796405u;
+    var cur_plus = 2891336453u;
+    var delta = advance_by;
+    while delta > 0 {
+        if delta == 1 {
+            acc_mult *= cur_mult;
+            acc_plus = acc_plus * cur_mult + cur_plus;
+        }
+        cur_plus = (cur_mult + 1u) * cur_plus;
+        cur_mult *= cur_mult;
+        delta = delta >> 1;
+    }
+    *state = *state * acc_mult + acc_plus;
 }
 
 fn jenkins_hash(input: u32) -> u32 {

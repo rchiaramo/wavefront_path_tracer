@@ -118,8 +118,8 @@ fn rng_next_vec3in_unit_sphere(state: ptr<function, u32>) -> vec3<f32> {
 }
 
 fn rng_next_float(state: ptr<function, u32>) -> f32 {
-    rng_next_int(state);
-    return f32(*state) * 2.3283064365387e-10f;  // / f32(0xffffffffu - 1f);
+    let x = rng_next_int(state);
+    return f32(x) * 2.3283064365387e-10f;  // / f32(0xffffffffu - 1f);
 }
 
 fn init_rng(pixel: vec2<u32>, resolution: vec2<u32>, frame: u32) -> u32 {
@@ -127,11 +127,34 @@ fn init_rng(pixel: vec2<u32>, resolution: vec2<u32>, frame: u32) -> u32 {
     return jenkins_hash(seed);
 }
 
-fn rng_next_int(state: ptr<function, u32>) {
+// This is (I think) a correct implementation of the PCG-RXS-M-XS rng;  the
+// LCG is the state, and we can advance ahead in it if we like
+// the next int function returns an output function based on the LCG
+fn rng_next_int(state: ptr<function, u32>) -> u32 {
     // PCG hash RXS-M-XS
-    let old_state = *state + 747796405u + 2891336453u;
+    let old_state = *state * 747796405u + 2891336453u;  // LCG
+    *state = old_state;  // store this as the new state
+    // below is the output function for RXS-M-XS
     let word = ((old_state >> ((old_state >> 28u) + 4u)) ^ old_state) * 277803737u;
-    *state = (word >> 22u) ^ word;
+    return (word >> 22u) ^ word;
+}
+
+fn advance(state: ptr<function, u32>, advance_by: u32) {
+    var acc_mult = 1u;
+    var acc_plus = 0u;
+    var cur_mult = 747796405u;
+    var cur_plus = 2891336453u;
+    var delta = advance_by;
+    while delta > 0 {
+        if delta == 1 {
+            acc_mult *= cur_mult;
+            acc_plus = acc_plus * cur_mult + cur_plus;
+        }
+        cur_plus = (cur_mult + 1u) * cur_plus;
+        cur_mult *= cur_mult;
+        delta = delta >> 1;
+    }
+    *state = *state * acc_mult + acc_plus;
 }
 
 fn jenkins_hash(input: u32) -> u32 {
