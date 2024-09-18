@@ -8,12 +8,12 @@ pub struct GPUBuffer {
 
 
 impl GPUBuffer {
-    pub fn new(device: &Device, usage: BufferUsages, size: BufferAddress, binding_idx: u32, label: Option<&str>)
+    pub fn new(device: &Device, usage: BufferUsages, size: BufferAddress, label: Option<&str>)
                -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label,
             size,
-            usage: usage | BufferUsages::COPY_DST,
+            usage,
             mapped_at_creation: false,
         });
         Self {
@@ -29,7 +29,7 @@ impl GPUBuffer {
         let buffer = device.create_buffer_init(&BufferInitDescriptor {
             label,
             contents: data,
-            usage: usage | BufferUsages::COPY_DST,
+            usage,
         });
         Self {
             name: buffer,
@@ -48,15 +48,12 @@ impl GPUBuffer {
 
     pub fn layout(&self, visibility: ShaderStages, binding_idx: u32, read_only: bool) -> BindGroupLayoutEntry {
         let mut buffer_binding_type: BufferBindingType = Default::default();
-        match self.usage {
-            BufferUsages::STORAGE => {
-                buffer_binding_type = BufferBindingType::Storage { read_only };
-            }
-            BufferUsages::UNIFORM => {
-                buffer_binding_type = BufferBindingType::Uniform;
-            }
-            _ => {}
+        if self.usage.contains(BufferUsages::STORAGE) {
+            buffer_binding_type = BufferBindingType::Storage { read_only };
+        } else if self.usage.contains(BufferUsages::UNIFORM) {
+            buffer_binding_type = BufferBindingType::Uniform;
         }
+
         BindGroupLayoutEntry {
             binding: binding_idx,
             visibility,

@@ -18,6 +18,8 @@ impl ComputeRestKernel {
                image_buffer: &GPUBuffer,
                frame_buffer: &GPUBuffer,
                ray_buffer: &GPUBuffer,
+               miss_buffer: &GPUBuffer,
+               counter_buffer: &GPUBuffer,
                sphere_buffer: &GPUBuffer,
                material_buffer: &GPUBuffer,
                bvh_buffer: &GPUBuffer,
@@ -35,7 +37,9 @@ impl ComputeRestKernel {
                 label: Some("image buffer bind group layout"),
                 entries: &[image_buffer.layout(ShaderStages::COMPUTE, 0, false),
                     frame_buffer.layout(ShaderStages::COMPUTE, 1,false),
-                    ray_buffer.layout(ShaderStages::COMPUTE, 2, true)
+                    ray_buffer.layout(ShaderStages::COMPUTE, 2, true),
+                    miss_buffer.layout(ShaderStages::COMPUTE, 3, false),
+                    counter_buffer.layout(ShaderStages::COMPUTE, 4, false)
                 ],
             });
 
@@ -44,7 +48,9 @@ impl ComputeRestKernel {
             layout: &image_buffer_bind_group_layout,
             entries: &[image_buffer.binding(0),
                 frame_buffer.binding(1),
-                ray_buffer.binding(2)
+                ray_buffer.binding(2),
+                miss_buffer.binding(3),
+                counter_buffer.binding(4)
             ],
         });
 
@@ -125,7 +131,9 @@ impl ComputeRestKernel {
     // do the version of execute (dispatch workgroups vs draw)
     // submit the encoder through the queue
     // possibly present the output (display kernel)
-    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32), mut _queries: Queries) {
+    pub fn run(&self, device: &Device, queue: &Queue,
+               workgroup_size: (u32, u32), mut _queries: Queries,
+               counter_buffer: &GPUBuffer, read_buffer: &GPUBuffer) {
 
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
@@ -151,6 +159,9 @@ impl ComputeRestKernel {
 
         }
         // queries.resolve(&mut encoder);
+        encoder.copy_buffer_to_buffer(counter_buffer.name(), 0,
+                                      read_buffer.name(), 0,
+                                      read_buffer.name().size());
         queue.submit(Some(encoder.finish()));
     }
 

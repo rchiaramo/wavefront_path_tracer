@@ -4,6 +4,7 @@ mod query_gpu;
 mod generate_ray;
 mod compute_rest;
 mod display;
+mod miss;
 
 use glam::Vec3;
 use winit::error::EventLoopError;
@@ -32,10 +33,10 @@ fn main() -> Result<(), EventLoopError> {
                                 4.0,
                                 0.1);
     let screen_size = (2880, 1620); // (1920, 1080) (3840, 2160)
-    let sampling_parameters = SamplingParameters::new(2,
-                                                      50,
+    let sampling_parameters = SamplingParameters::new(1,
                                                       0,
-                                                      500);
+                                                      0,
+                                                      1);
     let render_parameters
         = RenderParameters::new(camera_controller, screen_size);
     

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use glam::{Mat4, UVec2};
+use imgui::Key::B;
 use crate::query_gpu::Queries;
 use wavefront_common::bvh::BVHTree;
 use wavefront_common::gpu_buffer::GPUBuffer;
@@ -15,12 +16,16 @@ use wavefront_common::wgpu_state::WgpuState;
 use crate::compute_rest::ComputeRestKernel;
 use crate::display::DisplayKernel;
 use crate::generate_ray::GenerateRayKernel;
+use crate::miss::MissKernel;
 
 pub struct PathTracer<'a> {
     wgpu_state: WgpuState<'a>,
     image_buffer: GPUBuffer,
     frame_buffer: GPUBuffer,
     ray_buffer: GPUBuffer,
+    miss_buffer: GPUBuffer,
+    counter_buffer: GPUBuffer,
+    counter_read_buffer: GPUBuffer,
     spheres_buffer: GPUBuffer,
     materials_buffer: GPUBuffer,
     bvh_buffer: GPUBuffer,
@@ -30,6 +35,7 @@ pub struct PathTracer<'a> {
     sampling_parameters_buffer: GPUBuffer,
     generate_ray_kernel: GenerateRayKernel,
     compute_rest_kernel: ComputeRestKernel,
+    miss_kernel: MissKernel,
     display_kernel: DisplayKernel,
     render_parameters: RenderParameters,
     sampling_parameters: SamplingParameters,
@@ -52,36 +58,57 @@ impl<'a> PathTracer<'a> {
         let image = vec![[0.0f32; 3]; max_window_size as usize];
         let image_buffer = 
             GPUBuffer::new_from_bytes(device,
-                                             BufferUsages::STORAGE,
-                                             bytemuck::cast_slice(image.as_slice()),
-                                             Some("image buffer"));
+                                      BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                                      bytemuck::cast_slice(image.as_slice()),
+                                      Some("image buffer"));
 
         // create the frame_buffer
         let frame_buffer = GPUBuffer::new(device,
-                                                 BufferUsages::UNIFORM,
-                                                 16 as BufferAddress,
-                                                 1u32,
-                                                 Some("frame buffer"));
+                                          BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                                          16 as BufferAddress,
+                                          Some("frame buffer"));
 
         // create the ray_buffer
         let rays = vec![Ray::default(); max_window_size as usize];
         let ray_buffer =
             GPUBuffer::new_from_bytes(device,
-                                             BufferUsages::STORAGE,
-                                             bytemuck::cast_slice(rays.as_slice()),
-                                             Some("ray buffer"));
+                                      BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                                      bytemuck::cast_slice(rays.as_slice()),
+                                      Some("ray buffer"));
+
+        // create the miss buffer
+        let misses = vec!(0u32; max_window_size as usize);
+        let miss_buffer =
+            GPUBuffer::new_from_bytes(device,
+                                      BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+                                      bytemuck::cast_slice(misses.as_slice()),
+                                      Some("misses buffer"));
+
+        // create the counter buffer
+        let counter = vec![0u32;8];
+        let counter_buffer =
+            GPUBuffer::new_from_bytes(device,
+                                      BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                                      bytemuck::cast_slice(counter.as_slice()),
+                                      Some("counter_buffer"));
+
+        let counter_read_buffer =
+            GPUBuffer::new(device,
+                           BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                           32 as BufferAddress,
+                           Some("counter read buffer"));
 
         // create the scene and the bvh_tree that corresponds to it
         let mut bvh_tree= BVHTree::new(scene.spheres.len());
         bvh_tree.build_bvh_tree(&mut scene.spheres);
 
-        let spheres_buffer = GPUBuffer::new_from_bytes(device, BufferUsages::STORAGE,
+        let spheres_buffer = GPUBuffer::new_from_bytes(device, BufferUsages::STORAGE | BufferUsages::COPY_DST,
                                                               bytemuck::cast_slice(scene.spheres.as_slice()),
                                                               Some("spheres buffer"));
-        let materials_buffer = GPUBuffer::new_from_bytes(device, BufferUsages::STORAGE,
+        let materials_buffer = GPUBuffer::new_from_bytes(device, BufferUsages::STORAGE | BufferUsages::COPY_DST,
                                                                 bytemuck::cast_slice(scene.materials.as_slice()),
                                                                 Some("materials buffer"));
-        let bvh_buffer = GPUBuffer::new_from_bytes(device, BufferUsages::STORAGE,
+        let bvh_buffer = GPUBuffer::new_from_bytes(device, BufferUsages::STORAGE | BufferUsages::COPY_DST,
                                                           bytemuck::cast_slice(bvh_tree.nodes.as_slice()),
                                                           Some("bvh_tree buffer"));
         
@@ -102,22 +129,22 @@ impl<'a> PathTracer<'a> {
         let gpu_camera = camera_controller.get_GPU_camera();
 
         let camera_buffer = GPUBuffer::new_from_bytes(device,
-                                                             BufferUsages::UNIFORM,
+                                                             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                                                              bytemuck::cast_slice(&[gpu_camera]),
                                                              Some("camera buffer"));
 
         let sampling_parameters_buffer = GPUBuffer::new_from_bytes(device,
-                                                                          BufferUsages::UNIFORM,
+                                                                          BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                                                                           bytemuck::cast_slice(&[gpu_sampling_params]),
                                                                           Some("sampling parameters buffer"));
 
         let projection_buffer = GPUBuffer::new_from_bytes(device,
-                                                                 BufferUsages::UNIFORM,
+                                                                 BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                                                                  bytemuck::cast_slice(&[proj_mat]),
                                                                  Some("projection buffer"));
 
         let view_buffer = GPUBuffer::new_from_bytes(device,
-                                                           BufferUsages::UNIFORM,
+                                                           BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                                                            bytemuck::cast_slice(&[view_mat]),
                                                            Some("view buffer"));
 
@@ -136,11 +163,15 @@ impl<'a> PathTracer<'a> {
                                      &image_buffer,
                                      &frame_buffer,
                                      &ray_buffer,
+                                     &miss_buffer,
+                                     &counter_buffer,
                                      &spheres_buffer,
                                      &materials_buffer,
                                      &bvh_buffer,
                                      &camera_buffer,
                                      &sampling_parameters_buffer);
+
+        let miss_kernel = MissKernel::new(device, &image_buffer, &ray_buffer, &miss_buffer);
 
         let display_kernel = DisplayKernel::new(device, &image_buffer, &frame_buffer);
 
@@ -149,6 +180,9 @@ impl<'a> PathTracer<'a> {
             image_buffer,
             frame_buffer,
             ray_buffer,
+            miss_buffer,
+            counter_buffer,
+            counter_read_buffer,
             spheres_buffer,
             materials_buffer,
             bvh_buffer,
@@ -158,6 +192,7 @@ impl<'a> PathTracer<'a> {
             sampling_parameters_buffer,
             generate_ray_kernel,
             compute_rest_kernel,
+            miss_kernel,
             display_kernel,
             render_parameters,
             sampling_parameters,
@@ -237,42 +272,68 @@ impl<'a> PathTracer<'a> {
     pub fn run(&mut self) {
         self.update_buffers();
 
-        // always update the frame
-        let mut frame = self.render_progress.get_next_frame(&mut self.render_parameters);
-        let samples_per_frame = self.sampling_parameters.samples_per_frame;
-        for sample_number in 0..samples_per_frame {
-            {
-                let device = self.wgpu_state.device();
-                let queue = self.wgpu_state.queue();
+        if self.render_progress.accumulated_samples() < self.sampling_parameters.samples_per_pixel {
+            // always update the frame
+            let mut frame = self.render_progress.get_next_frame(&mut self.render_parameters);
+            let samples_per_frame = self.sampling_parameters.samples_per_frame;
+            for sample_number in 0..samples_per_frame {
+                {
+                    let device = self.wgpu_state.device();
+                    let queue = self.wgpu_state.queue();
 
-                frame.set_sample_number(sample_number);
-                self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
+                    frame.set_sample_number(sample_number);
+                    self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
 
-                let (width, height) = self.render_parameters.viewport_size();
+                    let (width, height) = self.render_parameters.viewport_size();
 
-                let mut gen_queries = Queries::new(device, 2);
+                    let mut gen_queries = Queries::new(device, 2);
 
-                // fundamental rendering loop
-                // remember this gets called every frame and renders the whole scene,
-                // accumulating pixel color
-                // therefore, we generate new initial rays every time here
-                self.generate_ray_kernel.run(device,
-                                             queue,
-                                             (width, height),
-                                             gen_queries);
+                    // fundamental rendering loop
+                    // remember this gets called every frame and renders the whole scene,
+                    // accumulating pixel color
+                    // therefore, we generate new initial rays every time here
+                    self.generate_ray_kernel.run(device,
+                                                 queue,
+                                                 (width, height),
+                                                 gen_queries);
 
 
-                let mut comp_queries = Queries::new(device, 2);
-                self.compute_rest_kernel.run(device, queue, (width, height), comp_queries);
-                self.render_progress.incr_accumulated_samples(samples_per_frame);
+                    let mut comp_queries = Queries::new(device, 2);
+                    self.compute_rest_kernel.run(device,
+                                                 queue,
+                                                 (width, height),
+                                                 comp_queries,
+                                                 &self.counter_buffer,
+                                                 &self.counter_read_buffer);
+                    self.render_progress.incr_accumulated_samples(samples_per_frame);
+
+                    self.counter_read_buffer.name()
+                        .slice(..)
+                        .map_async(wgpu::MapMode::Read, |_| ());
+                    device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+
+                    let counter: Vec<u32>  = {
+                        let counter_view = self
+                            .counter_read_buffer.name()
+                            .slice(..)
+                            .get_mapped_range();
+                        bytemuck::cast_slice(&counter_view).to_vec()
+                    };
+                    let num_misses = counter[0];
+                    self.counter_read_buffer.name().unmap();
+
+                    let mut miss_queries = Queries::new(device, 2);
+                    self.miss_kernel.run(&device, &queue, (num_misses / 16, 16), miss_queries);
+                    self.counter_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[0u32;4]));
+                }
             }
-        }
-        // sloppy solution right now, but I'm double using the sample_number for the display shader
-        // by storing the total accumulated samples in that variable
-        let queue = self.wgpu_state.queue();
-        frame.set_sample_number(self.render_progress.accumulated_samples());
-        self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
+            // sloppy solution right now, but I'm double using the sample_number for the display shader
+            // by storing the total accumulated samples in that variable
+            let queue = self.wgpu_state.queue();
+            frame.set_sample_number(self.render_progress.accumulated_samples());
+            self.frame_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[frame]));
 
-        self.display_kernel.run(&mut self.wgpu_state);
+            self.display_kernel.run(&mut self.wgpu_state);
+        }
     }
 }

@@ -64,6 +64,8 @@ const STACKSIZE:u32 = 10;
 @group(0) @binding(0) var<storage, read_write> image_buffer: array<array<f32, 3>>;
 @group(0) @binding(1) var<uniform> frame_buffer: FrameBuffer;
 @group(0) @binding(2) var<storage, read> ray_buffer: array<Ray>;
+@group(0) @binding(3) var<storage, read_write> miss_buffer: array<u32>;
+@group(0) @binding(4) var<storage, read_write> counter_buffer: array<atomic<u32>>;
 @group(1) @binding(0) var<storage, read> spheres: array<Sphere>;
 @group(1) @binding(1) var<storage, read> materials: array<Material>;
 @group(1) @binding(2) var<storage, read> bvhTree: array<BVHNode>;
@@ -86,36 +88,29 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         pixel_color = vec3f(0.0, 0.0, 0.0);
     }
 
-    var ray: Ray = ray_buffer[idx];
-    pixel_color += ray_color(ray, &rng_state);
+    pixel_color = ray_color(&rng_state, idx);
 
     image_buffer[idx][0] = pixel_color.x;
     image_buffer[idx][1] = pixel_color.y;
     image_buffer[idx][2] = pixel_color.z;
 }
 
-fn ray_color(primary_ray: Ray, state: ptr<function, u32>) -> vec3<f32> {
-    // for every ray, we want to trace the ray through num_bounces
-    // ray_color calls traceRay to get a hit, then calls it again
-    // with new bounce ray
-    var next_ray = primary_ray;
-    var throughput: vec3f = vec3f(1.0);
+fn ray_color(state: ptr<function, u32>, ray_idx: u32) -> vec3<f32> {
+    var ray = ray_buffer[ray_idx];
     var pixel_color: vec3f = vec3f(0.0);
-    for (var i: u32 = 0; i < sampling_parameters.num_bounces; i++) {
-        var pay_load = HitPayload();
 
-        if trace_ray(next_ray, &pay_load) {
-            // depending on what kind of material, I need to find the scatter ray and the attenuation
-            let mat_idx:u32 = spheres[pay_load.idx].mat_idx;
-            get_scatter_ray(&next_ray, mat_idx, &pay_load, state);
+    var pay_load = HitPayload();
 
-            throughput *= materials[mat_idx].albedo.xyz;
-        } else {
-            let a: f32 = 0.5 * (primary_ray.direction.y + 1.0);
-            pixel_color = throughput * ((1.0 - a) * vec3f(1.0, 1.0, 1.0) + a * vec3f(0.5, 0.7, 1.0));
-            break;
-        }
+    if trace_ray(ray, &pay_load) {
+        // depending on what kind of material, I need to find the scatter ray and the attenuation
+        let mat_idx:u32 = spheres[pay_load.idx].mat_idx;
+        get_scatter_ray(&ray, mat_idx, &pay_load, state);
+        pixel_color = materials[mat_idx].albedo.xyz;
+        atomicAdd(&counter_buffer[1], 1u);
+    } else {
+        miss_buffer[atomicAdd(&counter_buffer[0], 1u)] = ray_idx;
     }
+
     return pixel_color;
 }
 
