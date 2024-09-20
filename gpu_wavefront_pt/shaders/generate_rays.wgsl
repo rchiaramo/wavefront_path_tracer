@@ -38,7 +38,7 @@ struct ViewBuffer {
 @group(1) @binding(2) var<uniform> projection_matrix: ProjectionBuffer;
 @group(1) @binding(3) var<uniform> view_matrix: ViewBuffer;
 
-@compute @workgroup_size(1,1,1)
+@compute @workgroup_size(8,4,1)
 fn main(@builtin(global_invocation_id) id: vec3u) {
     let width = frame_buffer.width;
     let height = frame_buffer.height;

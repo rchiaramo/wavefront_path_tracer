@@ -1,14 +1,6 @@
 use std::collections::VecDeque;
 use wgpu::Queue;
 
-pub struct Queries {
-    pub set: wgpu::QuerySet,
-    resolve_buffer: wgpu::Buffer,
-    destination_buffer: wgpu::Buffer,
-    num_queries: u64,
-    pub next_unused_query: u32,
-}
-
 #[derive(Default)]
 pub struct QueryResults {
     compute_start_end_timestamps: [u64; 2],
@@ -60,6 +52,14 @@ impl QueryResults {
             ) as f32
         );
     }
+}
+
+pub struct Queries {
+    pub set: wgpu::QuerySet,
+    resolve_buffer: wgpu::Buffer,
+    destination_buffer: wgpu::Buffer,
+    num_queries: u64,
+    pub next_unused_query: u32,
 }
 
 impl Queries {

@@ -1,15 +1,15 @@
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
-use crate::query_gpu::Queries;
+use crate::query_gpu::{Queries, QueryResults};
 
-pub struct ComputeRestKernel {
+pub struct ShadeKernel {
     image_buffer_bind_group: BindGroup,
     scene_buffer_bind_group: BindGroup,
-    parameters_buffer_bind_group: BindGroup,
-    pipeline: ComputePipeline
+    pipeline: ComputePipeline,
+    timing_query: Queries,
 }
 
-impl ComputeRestKernel {
+impl ShadeKernel {
     // on initialization, a kernel needs to:
     // create bind group layout and bind group
     // load a shader
@@ -18,7 +18,7 @@ impl ComputeRestKernel {
                image_buffer: &GPUBuffer,
                frame_buffer: &GPUBuffer,
                ray_buffer: &GPUBuffer,
-               miss_buffer: &GPUBuffer,
+               hit_buffer: &GPUBuffer,
                counter_buffer: &GPUBuffer,
                sphere_buffer: &GPUBuffer,
                material_buffer: &GPUBuffer,
@@ -27,7 +27,7 @@ impl ComputeRestKernel {
                sampling_parameters_buffer: &GPUBuffer) -> Self {
         // load the kernel
         let shader = device.create_shader_module(
-            wgpu::include_wgsl!("../shaders/compute_rest.wgsl"));
+            wgpu::include_wgsl!("../shaders/shade.wgsl"));
 
         // create the various bind groups
         // group image, frame, and ray buffers into image bind group
@@ -38,7 +38,7 @@ impl ComputeRestKernel {
                 entries: &[image_buffer.layout(ShaderStages::COMPUTE, 0, false),
                     frame_buffer.layout(ShaderStages::COMPUTE, 1,false),
                     ray_buffer.layout(ShaderStages::COMPUTE, 2, true),
-                    miss_buffer.layout(ShaderStages::COMPUTE, 3, false),
+                    hit_buffer.layout(ShaderStages::COMPUTE, 3, false),
                     counter_buffer.layout(ShaderStages::COMPUTE, 4, false)
                 ],
             });
@@ -49,7 +49,7 @@ impl ComputeRestKernel {
             entries: &[image_buffer.binding(0),
                 frame_buffer.binding(1),
                 ray_buffer.binding(2),
-                miss_buffer.binding(3),
+                hit_buffer.binding(3),
                 counter_buffer.binding(4)
             ],
         });
@@ -59,35 +59,15 @@ impl ComputeRestKernel {
             &BindGroupLayoutDescriptor{
                 label: Some("scene buffer bind group layout"),
                 entries: &[sphere_buffer.layout(ShaderStages::COMPUTE, 0,true),
-                    material_buffer.layout(ShaderStages::COMPUTE, 1,  true),
-                    bvh_buffer.layout(ShaderStages::COMPUTE, 2,true)],
+                    material_buffer.layout(ShaderStages::COMPUTE, 1,  true)],
             });
 
         let scene_buffer_bind_group = device.create_bind_group(&BindGroupDescriptor{
             label: Some("scene buffer bind group"),
             layout: &scene_buffer_bind_group_layout,
             entries: &[sphere_buffer.binding(0),
-                material_buffer.binding(1),
-                bvh_buffer.binding(2)],
-        });
-
-        // put everything else into parameters buffer bind group
-        let parameters_buffer_bind_group_layout = device.create_bind_group_layout(
-            &BindGroupLayoutDescriptor{
-                label: Some("parameters buffer bind group layout"),
-                entries: &[
-                    camera_buffer.layout(ShaderStages::COMPUTE, 0, true),
-                    sampling_parameters_buffer.layout(ShaderStages::COMPUTE, 1, true),
-                ],
-            });
-
-        let parameters_buffer_bind_group = device.create_bind_group(&BindGroupDescriptor{
-            label: Some("parameters bind group"),
-            layout: &parameters_buffer_bind_group_layout,
-            entries: &[
-                camera_buffer.binding(0),
-                sampling_parameters_buffer.binding(1),
-            ],
+                material_buffer.binding(1)
+                ]
         });
 
         // create the pipeline
@@ -97,7 +77,6 @@ impl ComputeRestKernel {
                 bind_group_layouts: &[
                     &image_buffer_bind_group_layout,
                     &scene_buffer_bind_group_layout,
-                    &parameters_buffer_bind_group_layout
                 ],
                 push_constant_ranges: &[],
             }
@@ -117,8 +96,8 @@ impl ComputeRestKernel {
         Self {
             image_buffer_bind_group,
             scene_buffer_bind_group,
-            parameters_buffer_bind_group,
-            pipeline
+            pipeline,
+            timing_query: Queries::new(device, QueryResults::NUM_QUERIES)
         }
     }
 
@@ -132,7 +111,7 @@ impl ComputeRestKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
     pub fn run(&self, device: &Device, queue: &Queue,
-               workgroup_size: (u32, u32), mut _queries: Queries,
+               workgroup_size: (u32, u32),
                counter_buffer: &GPUBuffer, read_buffer: &GPUBuffer) {
 
         let mut encoder = device.create_command_encoder(
@@ -154,7 +133,6 @@ impl ComputeRestKernel {
             compute_rest_pass.set_pipeline(&self.pipeline);
             compute_rest_pass.set_bind_group(0, &self.image_buffer_bind_group, &[]);
             compute_rest_pass.set_bind_group(1, &self.scene_buffer_bind_group, &[]);
-            compute_rest_pass.set_bind_group(2, &self.parameters_buffer_bind_group, &[]);
             compute_rest_pass.dispatch_workgroups(workgroup_size.0, workgroup_size.1, 1);
 
         }

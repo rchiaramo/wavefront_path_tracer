@@ -44,8 +44,8 @@ impl<'a> WgpuState<'a> {
             &wgpu::DeviceDescriptor {
                 required_features: features,
                 required_limits: wgpu::Limits {
-                    max_storage_buffer_binding_size: 1024_u32 << 20,
-                    max_buffer_size: 1024_u64 << 20,
+                    max_storage_buffer_binding_size: 1024u32 << 20,
+                    max_buffer_size: 1_u64 << 35,
                     ..Default::default()
                 },
                 label: None,

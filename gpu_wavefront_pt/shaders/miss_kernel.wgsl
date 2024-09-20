@@ -9,7 +9,7 @@ struct Ray {
 @group(0) @binding(1) var<storage, read> ray_buffer: array<Ray>;
 @group(0) @binding(2) var<storage, read_write> miss_buffer: array<u32>;
 
-@compute @workgroup_size(8,8,1)
+@compute @workgroup_size(8,4,1)
 fn main(
     @builtin(workgroup_id) workgroup_id: vec3u,
     @builtin(local_invocation_index) local_index: u32,
@@ -18,7 +18,7 @@ fn main(
     let workgroup_index = workgroup_id.x +
         workgroup_id.y * num_workgroups.x +
         workgroup_id.z * num_workgroups.x * num_workgroups.y;
-    let ind = workgroup_index * 64u + local_index;
+    let ind = workgroup_index * 32u + local_index;
 
     let ray_idx = miss_buffer[ind];
     let ray = ray_buffer[ray_idx];

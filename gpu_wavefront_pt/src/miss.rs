@@ -1,10 +1,11 @@
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
-use crate::query_gpu::Queries;
+use crate::query_gpu::{Queries, QueryResults};
 
 pub struct MissKernel {
     miss_buffer_bind_group: BindGroup,
-    pipeline: ComputePipeline
+    pipeline: ComputePipeline,
+    timing_query: Queries
 }
 
 impl MissKernel {
@@ -61,7 +62,8 @@ impl MissKernel {
 
         Self {
             miss_buffer_bind_group,
-            pipeline
+            pipeline,
+            timing_query: Queries::new(device, QueryResults::NUM_QUERIES)
         }
     }
 
@@ -75,7 +77,7 @@ impl MissKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32), mut _queries: Queries) {
+    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32)) {
 
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {

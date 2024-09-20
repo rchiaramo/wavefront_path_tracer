@@ -13,8 +13,9 @@ use wavefront_common::ray::Ray;
 use wgpu::{BufferAddress, BufferUsages, ComputePassTimestampWrites, Device, Queue, ShaderStages, Surface, TextureFormat};
 use winit::event::WindowEvent;
 use wavefront_common::wgpu_state::WgpuState;
-use crate::compute_rest::ComputeRestKernel;
+use crate::shade::ShadeKernel;
 use crate::display::DisplayKernel;
+use crate::extend::ExtendKernel;
 use crate::generate_ray::GenerateRayKernel;
 use crate::miss::MissKernel;
 
@@ -24,6 +25,7 @@ pub struct PathTracer<'a> {
     frame_buffer: GPUBuffer,
     ray_buffer: GPUBuffer,
     miss_buffer: GPUBuffer,
+    hit_buffer: GPUBuffer,
     counter_buffer: GPUBuffer,
     counter_read_buffer: GPUBuffer,
     spheres_buffer: GPUBuffer,
@@ -34,7 +36,8 @@ pub struct PathTracer<'a> {
     view_buffer: GPUBuffer,
     sampling_parameters_buffer: GPUBuffer,
     generate_ray_kernel: GenerateRayKernel,
-    compute_rest_kernel: ComputeRestKernel,
+    extend_kernel: ExtendKernel,
+    compute_rest_kernel: ShadeKernel,
     miss_kernel: MissKernel,
     display_kernel: DisplayKernel,
     render_parameters: RenderParameters,
@@ -84,8 +87,15 @@ impl<'a> PathTracer<'a> {
                                       bytemuck::cast_slice(misses.as_slice()),
                                       Some("misses buffer"));
 
+        // create the hit buffer
+        let hit_buffer
+            = GPUBuffer::new(device,
+                             BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+                             32 * max_window_size as BufferAddress,
+                             Some("hit buffer"));
+
         // create the counter buffer
-        let counter = vec![0u32;8];
+        let counter = vec![0u32; 16];
         let counter_buffer =
             GPUBuffer::new_from_bytes(device,
                                       BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
@@ -95,7 +105,7 @@ impl<'a> PathTracer<'a> {
         let counter_read_buffer =
             GPUBuffer::new(device,
                            BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-                           32 as BufferAddress,
+                           4 * 16 as BufferAddress,
                            Some("counter read buffer"));
 
         // create the scene and the bvh_tree that corresponds to it
@@ -158,18 +168,28 @@ impl<'a> PathTracer<'a> {
                                      &projection_buffer,
                                      &view_buffer);
 
+        let extend_kernel
+            = ExtendKernel::new(device,
+                                &frame_buffer,
+                                &ray_buffer,
+                                &miss_buffer,
+                                &hit_buffer,
+                                &counter_buffer,
+                                &spheres_buffer,
+                                &bvh_buffer);
+
         let compute_rest_kernel
-            = ComputeRestKernel::new(device,
-                                     &image_buffer,
-                                     &frame_buffer,
-                                     &ray_buffer,
-                                     &miss_buffer,
-                                     &counter_buffer,
-                                     &spheres_buffer,
-                                     &materials_buffer,
-                                     &bvh_buffer,
-                                     &camera_buffer,
-                                     &sampling_parameters_buffer);
+            = ShadeKernel::new(device,
+                               &image_buffer,
+                               &frame_buffer,
+                               &ray_buffer,
+                               &hit_buffer,
+                               &counter_buffer,
+                               &spheres_buffer,
+                               &materials_buffer,
+                               &bvh_buffer,
+                               &camera_buffer,
+                               &sampling_parameters_buffer);
 
         let miss_kernel = MissKernel::new(device, &image_buffer, &ray_buffer, &miss_buffer);
 
@@ -181,6 +201,7 @@ impl<'a> PathTracer<'a> {
             frame_buffer,
             ray_buffer,
             miss_buffer,
+            hit_buffer,
             counter_buffer,
             counter_read_buffer,
             spheres_buffer,
@@ -191,6 +212,7 @@ impl<'a> PathTracer<'a> {
             view_buffer,
             sampling_parameters_buffer,
             generate_ray_kernel,
+            extend_kernel,
             compute_rest_kernel,
             miss_kernel,
             display_kernel,
@@ -286,26 +308,20 @@ impl<'a> PathTracer<'a> {
 
                     let (width, height) = self.render_parameters.viewport_size();
 
-                    let mut gen_queries = Queries::new(device, 2);
-
                     // fundamental rendering loop
                     // remember this gets called every frame and renders the whole scene,
                     // accumulating pixel color
                     // therefore, we generate new initial rays every time here
                     self.generate_ray_kernel.run(device,
                                                  queue,
-                                                 (width, height),
-                                                 gen_queries);
+                                                 (width / 8, height / 4));
 
-
-                    let mut comp_queries = Queries::new(device, 2);
-                    self.compute_rest_kernel.run(device,
-                                                 queue,
-                                                 (width, height),
-                                                 comp_queries,
-                                                 &self.counter_buffer,
-                                                 &self.counter_read_buffer);
-                    self.render_progress.incr_accumulated_samples(samples_per_frame);
+                    // the wavefront loop will start here
+                    self.extend_kernel.run(device,
+                                           queue,
+                                           (width / 8, height / 4),
+                                           &self.counter_buffer,
+                                           &self.counter_read_buffer);
 
                     self.counter_read_buffer.name()
                         .slice(..)
@@ -319,11 +335,21 @@ impl<'a> PathTracer<'a> {
                             .get_mapped_range();
                         bytemuck::cast_slice(&counter_view).to_vec()
                     };
+
                     let num_misses = counter[0];
+                    let num_hits = counter[1];
                     self.counter_read_buffer.name().unmap();
 
-                    let mut miss_queries = Queries::new(device, 2);
-                    self.miss_kernel.run(&device, &queue, (num_misses / 16, 16), miss_queries);
+                    self.compute_rest_kernel.run(device,
+                                                 queue,
+                                                 (num_hits / 64, 64),
+                                                 &self.counter_buffer,
+                                                 &self.counter_read_buffer);
+
+                    self.render_progress.incr_accumulated_samples(samples_per_frame);
+
+
+                    self.miss_kernel.run(&device, &queue, (num_misses / 64, 64));
                     self.counter_buffer.queue_for_gpu(queue, bytemuck::cast_slice(&[0u32;4]));
                 }
             }

@@ -5,7 +5,8 @@ use crate::query_gpu::Queries;
 pub struct GenerateRayKernel {
     ray_buffer_bind_group: BindGroup,
     parameters_buffer_bind_group: BindGroup,
-    pipeline: ComputePipeline
+    pipeline: ComputePipeline,
+    timing_query: Queries
 }
 
 impl GenerateRayKernel {
@@ -82,7 +83,8 @@ impl GenerateRayKernel {
         Self {
             ray_buffer_bind_group,
             parameters_buffer_bind_group,
-            pipeline
+            pipeline,
+            timing_query: Queries::new(device, 2),
         }
     }
 
@@ -96,7 +98,7 @@ impl GenerateRayKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32), mut _queries: Queries) {
+    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32)) {
 
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {

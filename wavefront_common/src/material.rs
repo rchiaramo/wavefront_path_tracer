@@ -3,7 +3,7 @@ use glam::{Vec3, Vec4};
 // material_type will be indexed as follows:
 // 0 Lambertian; 1 Metal; 2 Dielectric
 
-enum MaterialType {
+pub enum MaterialType {
     Lambertian = 0,
     Metal = 1,
     Dielectric = 2,
