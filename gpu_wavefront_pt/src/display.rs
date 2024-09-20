@@ -1,9 +1,11 @@
+use std::rc::Rc;
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, RenderPipeline, ShaderStages, Surface, TextureFormat};
 use wavefront_common::gpu_buffer::GPUBuffer;
 use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::Queries;
 
 pub struct DisplayKernel {
+    wgpu_state: Rc<WgpuState>,
     display_bind_group: BindGroup,
     pipeline: RenderPipeline
 }
@@ -13,11 +15,12 @@ impl DisplayKernel {
     // load a shader
     // create bind group layout and bind group
     // create a pipeline layout and a pipeline
-    pub fn new(device: &Device,
+    pub fn new(wgpu_state: Rc<WgpuState>,
                image_buffer: &GPUBuffer,
                frame_buffer: &GPUBuffer) -> Self {
 
         // load the kernel
+        let device = wgpu_state.device();
         let shader = device.create_shader_module(
             wgpu::include_wgsl!("../../wavefront_common/shaders/display_shader.wgsl")
         );
@@ -90,6 +93,7 @@ impl DisplayKernel {
         });
 
         Self {
+            wgpu_state,
             display_bind_group,
             pipeline
         }
@@ -105,12 +109,14 @@ impl DisplayKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, wgpu_state: &mut WgpuState) {
-        let output = wgpu_state.surface().get_current_texture().unwrap();
+    pub fn run(&mut self) {
+        let output = self.wgpu_state.surface.borrow_mut().get_current_texture().unwrap();
+        let device = self.wgpu_state.device();
+        let queue = self.wgpu_state.queue();
         let view = output.texture.create_view(
             &wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = wgpu_state.device().create_command_encoder(
+        let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("display kernel encoder"),
             });
@@ -139,7 +145,7 @@ impl DisplayKernel {
             //     gui.imgui.render(), queue, device, &mut display_pass
             // ).expect("failed to render gui");
         }
-        wgpu_state.queue().submit(Some(encoder.finish()));
+        queue.submit(Some(encoder.finish()));
         output.present();
     }
 }

@@ -15,9 +15,9 @@ use wavefront_common::gui::GUI;
 use wavefront_common::wgpu_state::WgpuState;
 
 
-pub struct App<'a> {
+pub struct App {
     window: Option<Arc<Window>>,
-    path_tracer: Option<PathTracer<'a>>,
+    path_tracer: Option<PathTracer>,
     gui: Option<GUI>,
     scene: Scene,
     render_parameters: RenderParameters,
@@ -26,7 +26,7 @@ pub struct App<'a> {
     frames_per_second: FramesPerSecond,
 }
 
-impl<'a> App<'a> {
+impl App {
     pub fn new(scene: Scene, render_parameters: RenderParameters, sampling_parameters: SamplingParameters) -> Self {
         Self {
             window: None,
@@ -41,7 +41,7 @@ impl<'a> App<'a> {
     }
 }
 
-impl ApplicationHandler for App<'_> {
+impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let size = self.render_parameters.viewport_size();
         if self.window.is_none() {

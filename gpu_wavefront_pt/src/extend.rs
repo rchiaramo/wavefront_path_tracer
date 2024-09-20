@@ -1,8 +1,11 @@
+use std::rc::Rc;
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
+use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::{Queries, QueryResults};
 
 pub struct ExtendKernel {
+    wgpu_state: Rc<WgpuState>,
     extend_shader_bind_group: BindGroup,
     scene_buffer_bind_group: BindGroup,
     pipeline: ComputePipeline,
@@ -14,7 +17,7 @@ impl ExtendKernel {
     // create bind group layout and bind group
     // load a shader
     // create a pipeline layout and a pipeline
-    pub fn new(device: &Device,
+    pub fn new(wgpu_state: Rc<WgpuState>,
                frame_buffer: &GPUBuffer,
                ray_buffer: &GPUBuffer,
                miss_buffer: &GPUBuffer,
@@ -23,6 +26,7 @@ impl ExtendKernel {
                sphere_buffer: &GPUBuffer,
                bvh_buffer: &GPUBuffer) -> Self {
         // load the kernel
+        let device = wgpu_state.device();
         let shader = device.create_shader_module(
             wgpu::include_wgsl!("../shaders/extend.wgsl"));
 
@@ -90,6 +94,7 @@ impl ExtendKernel {
         );
 
         Self {
+            wgpu_state: Rc::clone(&wgpu_state),
             extend_shader_bind_group,
             scene_buffer_bind_group,
             pipeline,
@@ -106,9 +111,12 @@ impl ExtendKernel {
     // do the version of execute (dispatch workgroups vs draw)
     // submit the encoder through the queue
     // possibly present the output (display kernel)
-    pub fn run(&self, device: &Device, queue: &Queue,
+    pub fn run(&self,
                workgroup_size: (u32, u32),
                counter_buffer: &GPUBuffer, read_buffer: &GPUBuffer) {
+
+        let device = self.wgpu_state.device();
+        let queue = self.wgpu_state.queue();
 
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {

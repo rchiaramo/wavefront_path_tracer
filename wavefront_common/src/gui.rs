@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 use imgui::{FontSource, MouseCursor};
 use imgui_wgpu::{Renderer, RendererConfig};
@@ -8,6 +9,7 @@ use crate::parameters::{RenderParameters, SamplingParameters};
 use crate::wgpu_state::WgpuState;
 
 pub struct GUI {
+    wgpu_state: Rc<WgpuState>,
     pub platform: WinitPlatform,
     pub imgui: imgui::Context,
     pub imgui_renderer: Renderer,
@@ -15,7 +17,7 @@ pub struct GUI {
 }
 
 impl GUI {
-    pub fn new(window: &Window, wgpu: &WgpuState)
+    pub fn new(window: &Window, wgpu_state: Rc<WgpuState>)
         -> Option<Self> {
 
         let mut imgui = imgui::Context::create();
@@ -39,16 +41,18 @@ impl GUI {
                 ..Default::default()
             }),
         }]);
-
+        let texture_format = wgpu_state.surface_config.borrow().format;
         let renderer_config = RendererConfig {
-            texture_format: wgpu.surface_config().format,
+            texture_format,
             ..Default::default()
         };
-
+        let device = wgpu_state.device();
+        let queue = wgpu_state.queue();
         let mut imgui_renderer
-            = Renderer::new(&mut imgui, &wgpu.device(), &wgpu.queue(), renderer_config);
+            = Renderer::new(&mut imgui, device, queue, renderer_config);
 
         Some(Self {
+            wgpu_state,
             platform,
             imgui,
             imgui_renderer,

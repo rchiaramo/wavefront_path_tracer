@@ -1,8 +1,11 @@
+use std::rc::Rc;
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
+use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::{Queries, QueryResults};
 
 pub struct MissKernel {
+    wgpu_state: Rc<WgpuState>,
     miss_buffer_bind_group: BindGroup,
     pipeline: ComputePipeline,
     timing_query: Queries
@@ -13,11 +16,12 @@ impl MissKernel {
     // create bind group layout and bind group
     // load a shader
     // create a pipeline layout and a pipeline
-    pub fn new(device: &Device,
+    pub fn new(wgpu_state: Rc<WgpuState>,
                image_buffer: &GPUBuffer,
                ray_buffer: &GPUBuffer,
                miss_buffer: &GPUBuffer) -> Self {
         // load the kernel
+        let device = wgpu_state.device();
         let shader = device.create_shader_module(
             wgpu::include_wgsl!("../shaders/miss_kernel.wgsl"));
 
@@ -61,6 +65,7 @@ impl MissKernel {
         );
 
         Self {
+            wgpu_state: Rc::clone(&wgpu_state),
             miss_buffer_bind_group,
             pipeline,
             timing_query: Queries::new(device, QueryResults::NUM_QUERIES)
@@ -77,8 +82,10 @@ impl MissKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32)) {
+    pub fn run(&self, workgroup_size: (u32, u32)) {
 
+        let device = self.wgpu_state.device();
+        let queue = self.wgpu_state.queue();
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("miss kernel encoder"),

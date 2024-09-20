@@ -1,8 +1,11 @@
+use std::rc::Rc;
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
+use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::Queries;
 
 pub struct GenerateRayKernel {
+    wgpu_state: Rc<WgpuState>,
     ray_buffer_bind_group: BindGroup,
     parameters_buffer_bind_group: BindGroup,
     pipeline: ComputePipeline,
@@ -14,13 +17,14 @@ impl GenerateRayKernel {
     // create bind group layout and bind group
     // load a shader
     // create a pipeline layout and a pipeline
-    pub fn new(device: &Device,
+    pub fn new(wgpu_state: Rc<WgpuState>,
                ray_buffer: &GPUBuffer,
                frame_buffer: &GPUBuffer,
                camera_buffer: &GPUBuffer,
                proj_matrix_buffer: &GPUBuffer,
                view_mat_buffer: &GPUBuffer) -> Self {
         // load the kernel
+        let device = wgpu_state.device();
         let shader = device.create_shader_module(
             wgpu::include_wgsl!("../shaders/generate_rays.wgsl"));
 
@@ -81,6 +85,7 @@ impl GenerateRayKernel {
         );
 
         Self {
+            wgpu_state: Rc::clone(&wgpu_state),
             ray_buffer_bind_group,
             parameters_buffer_bind_group,
             pipeline,
@@ -98,8 +103,9 @@ impl GenerateRayKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, device: &Device, queue: &Queue, workgroup_size: (u32, u32)) {
-
+    pub fn run(&self, workgroup_size: (u32, u32)) {
+        let device = self.wgpu_state.device();
+        let queue = self.wgpu_state.queue();
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("generate ray kernel encoder"),
@@ -126,6 +132,5 @@ impl GenerateRayKernel {
         // queries.resolve(&mut encoder);
         queue.submit(Some(encoder.finish()));
     }
-
 }
 

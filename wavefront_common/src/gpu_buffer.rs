@@ -1,15 +1,19 @@
+use std::rc::Rc;
 use wgpu::{BindGroupEntry, BindGroupLayoutEntry, BindingType, Buffer, BufferAddress, BufferBindingType, BufferUsages, Device, Queue, ShaderStages};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use crate::wgpu_state::WgpuState;
 
 pub struct GPUBuffer {
     name: Buffer,
     usage: BufferUsages,
+    wgpu_state: Rc<WgpuState>
 }
 
 
 impl GPUBuffer {
-    pub fn new(device: &Device, usage: BufferUsages, size: BufferAddress, label: Option<&str>)
+    pub fn new(wgpu_state: Rc<WgpuState>, usage: BufferUsages, size: BufferAddress, label: Option<&str>)
                -> Self {
+        let device = wgpu_state.device();
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label,
             size,
@@ -19,13 +23,15 @@ impl GPUBuffer {
         Self {
             name: buffer,
             usage,
+            wgpu_state
         }
     }
 
-    pub fn new_from_bytes(device: &Device,
+    pub fn new_from_bytes(wgpu_state: Rc<WgpuState>,
                           usage: BufferUsages,
                           data: &[u8],
                           label: Option<&str>) -> Self {
+        let device = wgpu_state.device();
         let buffer = device.create_buffer_init(&BufferInitDescriptor {
             label,
             contents: data,
@@ -34,6 +40,7 @@ impl GPUBuffer {
         Self {
             name: buffer,
             usage,
+            wgpu_state
         }
     }
 
@@ -41,7 +48,8 @@ impl GPUBuffer {
         &self.name
     }
 
-    pub fn queue_for_gpu(&mut self, queue: &Queue, data: &[u8]) {
+    pub fn queue_for_gpu(&mut self, data: &[u8]) {
+        let queue = self.wgpu_state.queue();
         queue.write_buffer(&self.name, 0, data);
     }
 

@@ -1,21 +1,22 @@
 use std::cell::{Ref, RefCell, RefMut};
+use std::rc::Rc;
 use std::sync::Arc;
 use wgpu::Surface;
 use winit::window::Window;
 
-pub struct WgpuState<'a> {
-    surface: Surface<'a>,
-    surface_config: wgpu::SurfaceConfiguration,
+pub struct WgpuState {
+    pub surface: RefCell<Surface<'static>>,
+    pub surface_config: RefCell<wgpu::SurfaceConfiguration>,
     device: wgpu::Device,
     queue: wgpu::Queue,
 }
 
-impl<'a> WgpuState<'a> {
-    pub fn new(window: Arc<Window>) -> WgpuState<'a> {
+impl WgpuState {
+    pub fn new(window: Arc<Window>) -> WgpuState {
         pollster::block_on(WgpuState::new_async(window))
     }
 
-    async fn new_async(window: Arc<Window>) -> WgpuState<'a> {
+    async fn new_async(window: Arc<Window>) -> WgpuState {
         let size = {
             let viewport = window.inner_size();
             (viewport.width, viewport.height)
@@ -28,7 +29,7 @@ impl<'a> WgpuState<'a> {
             }
         );
 
-        let surface = instance.create_surface(
+        let surface: wgpu::Surface<'_> = instance.create_surface(
             Arc::clone(&window)).expect("Failed to create surface");
 
         let adapter = instance.request_adapter(
@@ -68,30 +69,26 @@ impl<'a> WgpuState<'a> {
         };
 
         Self {
-            surface,
-            surface_config,
+            surface: RefCell::new(surface),
+            surface_config: RefCell::new(surface_config),
             device,
             queue,
         }
     }
 
-    pub fn surface_config(&self) -> wgpu::SurfaceConfiguration {
-        self.surface_config.clone()
-    }
     pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
-    pub fn surface(&mut self) -> &Surface {
-        &self.surface
-    }
 
-    pub fn resize(&mut self, new_size: (u32, u32))
+    pub fn resize(&self, new_size: (u32, u32))
     {
-        self.surface_config.width = new_size.0;
-        self.surface_config.height = new_size.1;
-        self.surface.configure(&self.device, &self.surface_config);
+        let mut x = self.surface_config.borrow_mut().width;
+        x = new_size.0;
+        let mut y = self.surface_config.borrow_mut().height;
+        y = new_size.1;
+        self.surface.borrow_mut().configure(&self.device, &*self.surface_config.borrow());
     }
 }
