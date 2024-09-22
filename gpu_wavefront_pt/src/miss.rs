@@ -19,7 +19,9 @@ impl MissKernel {
     pub fn new(wgpu_state: Rc<WgpuState>,
                image_buffer: &GPUBuffer,
                ray_buffer: &GPUBuffer,
-               miss_buffer: &GPUBuffer) -> Self {
+               miss_buffer: &GPUBuffer,
+               counter_buffer: &GPUBuffer,
+               accumulated_image_buffer: &GPUBuffer) -> Self {
         // load the kernel
         let device = wgpu_state.device();
         let shader = device.create_shader_module(
@@ -31,7 +33,9 @@ impl MissKernel {
                 label: Some("miss buffer bind group layout"),
                 entries: &[image_buffer.layout(ShaderStages::COMPUTE, 0, false),
                     ray_buffer.layout(ShaderStages::COMPUTE, 1, true),
-                    miss_buffer.layout(ShaderStages::COMPUTE, 2,false)
+                    miss_buffer.layout(ShaderStages::COMPUTE, 2,false),
+                    counter_buffer.layout(ShaderStages::COMPUTE, 3, true),
+                    accumulated_image_buffer.layout(ShaderStages::COMPUTE, 4, false)
                 ],
             });
         let miss_buffer_bind_group = device.create_bind_group(&BindGroupDescriptor{
@@ -39,7 +43,9 @@ impl MissKernel {
             layout: &miss_buffer_bind_group_layout,
             entries: &[image_buffer.binding(0),
                 ray_buffer.binding(1),
-                miss_buffer.binding(2)],
+                miss_buffer.binding(2),
+                counter_buffer.binding(3),
+                accumulated_image_buffer.binding(4)],
         });
 
         // create the pipeline

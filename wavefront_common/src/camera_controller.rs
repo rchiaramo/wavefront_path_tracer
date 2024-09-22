@@ -176,7 +176,7 @@ impl GPUCamera {
         let (camera_position, pitch, yaw) = camera.get_camera();
 
         GPUCamera {
-            camera_position: camera_position.extend(0.0),
+            camera_position: camera_position.extend(1.0),
             pitch,
             yaw,
             defocus_radius,

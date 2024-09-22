@@ -3,6 +3,12 @@ const PI = 3.1415927f;
 const FRAC_1_PI = 0.31830987f;
 const FRAC_PI_2 = 1.5707964f;
 
+struct Pixel {
+    r: f32,
+    g: f32,
+    b: f32
+}
+
 struct Sphere {
     center: vec4f,
     radius: f32,
@@ -18,16 +24,17 @@ struct Material {
 }
 
 struct Ray {
-    origin: vec3f,
-    direction: vec3f,
+    origin: vec4f,
+    direction: vec4f,
     invDirection: vec3f,
+    pixel_idx: u32
 }
 
 struct HitPayload {
-    ray_idx: u32,
     t: f32,
+    ray_idx: u32,
     sphere_idx: u32,
-    mat_type: u32,
+    mat_type: u32
 }
 
 struct FrameBuffer {
@@ -37,11 +44,12 @@ struct FrameBuffer {
     sample_number: u32
 }
 
-@group(0) @binding(0) var<storage, read_write> image_buffer: array<array<f32, 3>>;
+@group(0) @binding(0) var<storage, read_write> image_buffer: array<Pixel>;
 @group(0) @binding(1) var<uniform> frame_buffer: FrameBuffer;
-@group(0) @binding(2) var<storage, read> ray_buffer: array<Ray>;
-@group(0) @binding(3) var<storage, read_write> hit_buffer: array<HitPayload>;
-@group(0) @binding(4) var<storage, read_write> counter_buffer: array<atomic<u32>>;
+@group(0) @binding(2) var<storage, read_write> ray_buffer: array<Ray>;
+@group(0) @binding(3) var<storage, read_write> extension_ray_buffer: array<Ray>;
+@group(0) @binding(4) var<storage, read_write> hit_buffer: array<HitPayload>;
+@group(0) @binding(5) var<storage, read_write> counter_buffer: array<atomic<u32>>;
 @group(1) @binding(0) var<storage, read> spheres: array<Sphere>;
 @group(1) @binding(1) var<storage, read> materials: array<Material>;
 
@@ -55,54 +63,63 @@ fn main(@builtin(global_invocation_id) id: vec3u,
             workgroup_id.y * num_workgroups.x +
             workgroup_id.z * num_workgroups.x * num_workgroups.y;
     let idx = workgroup_index * 32u + local_index;
-    let image_size = vec2u(frame_buffer.width, frame_buffer.height);
+    if idx >= counter_buffer[1] {
+            return;
+    }
 
-    // load the stored pixel color
-    var pixel_color: vec3f = vec3f(image_buffer[idx][0], image_buffer[idx][1], image_buffer[idx][2]);
+    // set up the rng
+    let image_size = vec2u(frame_buffer.width, frame_buffer.height);
     var rng_state:u32 = init_rng(id.xy, image_size, frame_buffer.frame);
     advance(&rng_state, frame_buffer.sample_number * 10u);
 
-    pixel_color = ray_color(&rng_state, idx);
-
-    let ray_idx = hit_buffer[idx].ray_idx;
-
-    image_buffer[ray_idx][0] = pixel_color.x;
-    image_buffer[ray_idx][1] = pixel_color.y;
-    image_buffer[ray_idx][2] = pixel_color.z;
-}
-
-fn ray_color(state: ptr<function, u32>, idx: u32) -> vec3<f32> {
-
+    // set the appropriate indices
     let payload = hit_buffer[idx];
-    let ray = ray_buffer[payload.ray_idx];
-    var extension_ray = Ray();
+    let ray_idx = payload.ray_idx;
+    let ray = ray_buffer[ray_idx];
+    let pixel_idx = ray.pixel_idx;
     let sphere = spheres[payload.sphere_idx];
-    let mat_type = payload.mat_type;
     let mat_idx = sphere.mat_idx;
+
+    // load the stored pixel color
+    var pixel_color = vec3f(image_buffer[pixel_idx].r, image_buffer[pixel_idx].g, image_buffer[pixel_idx].b);
+
+    // multiply the new contribution in
+    pixel_color *= materials[mat_idx].albedo.xyz;
+
+    image_buffer[pixel_idx].r = pixel_color.x;
+    image_buffer[pixel_idx].g = pixel_color.y;
+    image_buffer[pixel_idx].b = pixel_color.z;
+
+    // determine the extension ray
+    let mat_type = payload.mat_type;
     let p = ray.origin + payload.t * ray.direction;
-    let n = normalize(p - sphere.center.xyz);
+    // annoying but Rays are all vec4 while I want to work below with vec3
+    let n = normalize(p - sphere.center).xyz;
 
-    let pixel_color: vec3f = materials[mat_idx].albedo.xyz;
+    var extension_ray = Ray();
+    extension_ray.pixel_idx = ray.pixel_idx;
+    extension_ray.origin = p;
 
-    // the code below will be for determining extension rays
+    // the code below determines extension rays based on material type
+    var extension_direction = vec3f(0.0, 0.0, 0.0);
     switch (mat_type) {
         case 0u, default {
-            var random_bounce: vec3f = normalize(rng_next_vec3in_unit_sphere(state));
+            var random_bounce: vec3f = normalize(rng_next_vec3in_unit_sphere(&rng_state));
 
-            extension_ray.direction = n + random_bounce;
-            if length(ray.direction) < 0.001 {
-                extension_ray.direction = n;
+            extension_direction = n + random_bounce;
+            if length(extension_direction) < 0.001 {
+                extension_direction = n;
             }
         }
         case 1u {
-            var random_bounce: vec3f = normalize(rng_next_vec3in_unit_sphere(state));
+            var random_bounce: vec3f = normalize(rng_next_vec3in_unit_sphere(&rng_state));
             let fuzz: f32 = materials[mat_idx].fuzz;
-            extension_ray.direction = reflect(ray.direction, n) + fuzz * random_bounce;
+            extension_direction = reflect(ray.direction.xyz, n) + fuzz * random_bounce;
         }
         case 2u {
             let refract_idx: f32 = materials[mat_idx].refract_idx;
             var norm: vec3f = n;
-            let uv = normalize(ray.direction);
+            let uv = normalize(ray.direction.xyz);
             var cos_theta: f32 = min(dot(norm, -uv), 1.0); // as uv represents incoming, -uv is outgoing direction
             var eta_over_eta_prime: f32 = 0.0;
 
@@ -127,23 +144,20 @@ fn ray_color(state: ptr<function, u32>, idx: u32) -> vec3<f32> {
             var refract_direction: vec3f = vec3f(0.0);
 
             if refract(uv, norm, eta_over_eta_prime, &refract_direction) {
-                if reflectance > rng_next_float(state) {
-                    extension_ray.direction = reflect(uv, norm);
+                if reflectance > rng_next_float(&rng_state) {
+                    extension_direction = reflect(uv, norm);
                 } else {
-                    extension_ray.direction = refract_direction;
+                    extension_direction = refract_direction;
                 }
             } else {
-                extension_ray.direction = reflect(uv, norm);
+                extension_direction = reflect(uv, norm);
             }
         }
     }
-    extension_ray.invDirection = 1.0 / extension_ray.direction;
-
-    return pixel_color;
+    extension_ray.invDirection = 1.0 / extension_direction;
+    extension_ray.direction = vec4f(extension_direction, 0.0);
+    extension_ray_buffer[atomicAdd(&counter_buffer[2], 1u)] = extension_ray;
 }
-
-
-
 
 fn schlick(cosine: f32, refraction_index: f32) -> f32 {
     var r0 = (1f - refraction_index) / (1f + refraction_index);
@@ -194,8 +208,7 @@ fn rng_next_vec3in_unit_sphere(state: ptr<function, u32>) -> vec3<f32> {
     // probability density is uniformly distributed over r^3
     let r = pow(rng_next_float(state), 0.33333f);
     // and need to distribute theta according to arccos(U[-1,1])
-    // let theta = acos(2f * rng_next_float(state) - 1.0);
-    let cos_theta = 2f * rng_next_float(state) - 1f;
+    let cos_theta = 1f - 2f * rng_next_float(state);
     let sin_theta = sqrt(1 - cos_theta * cos_theta);
     let phi = 2.0 * PI * rng_next_float(state);
 
@@ -216,11 +229,15 @@ fn init_rng(pixel: vec2<u32>, resolution: vec2<u32>, frame: u32) -> u32 {
     return jenkins_hash(seed);
 }
 
+// This is (I think) a correct implementation of the PCG-RXS-M-XS rng;  the
+// LCG is the state, and we can advance ahead in it if we like
+// the next int function returns an output function based on the LCG
 fn rng_next_int(state: ptr<function, u32>) -> u32 {
     // PCG hash RXS-M-XS
-    let old_state = *state * 747796405u + 2891336453u;
-    *state = old_state;
-    let word = ((old_state >> ((old_state >> 28u) + 4u)) ^ old_state) * 277803737u;
+    let new_state = *state * 747796405u + 2891336453u;  // LCG
+    *state = new_state;  // store this as the new state
+    // below is the output function for RXS-M-XS
+    let word = ((new_state >> ((new_state >> 28u) + 4u)) ^ new_state) * 277803737u;
     return (word >> 22u) ^ word;
 }
 

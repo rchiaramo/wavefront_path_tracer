@@ -21,6 +21,7 @@ impl ShadeKernel {
                image_buffer: &GPUBuffer,
                frame_buffer: &GPUBuffer,
                ray_buffer: &GPUBuffer,
+               extension_ray_buffer: &GPUBuffer,
                hit_buffer: &GPUBuffer,
                counter_buffer: &GPUBuffer,
                sphere_buffer: &GPUBuffer,
@@ -38,9 +39,10 @@ impl ShadeKernel {
                 label: Some("image buffer bind group layout"),
                 entries: &[image_buffer.layout(ShaderStages::COMPUTE, 0, false),
                     frame_buffer.layout(ShaderStages::COMPUTE, 1,false),
-                    ray_buffer.layout(ShaderStages::COMPUTE, 2, true),
-                    hit_buffer.layout(ShaderStages::COMPUTE, 3, false),
-                    counter_buffer.layout(ShaderStages::COMPUTE, 4, false)
+                    ray_buffer.layout(ShaderStages::COMPUTE, 2, false),
+                    extension_ray_buffer.layout(ShaderStages::COMPUTE, 3, false),
+                    hit_buffer.layout(ShaderStages::COMPUTE, 4, false),
+                    counter_buffer.layout(ShaderStages::COMPUTE, 5, false)
                 ],
             });
 
@@ -50,8 +52,9 @@ impl ShadeKernel {
             entries: &[image_buffer.binding(0),
                 frame_buffer.binding(1),
                 ray_buffer.binding(2),
-                hit_buffer.binding(3),
-                counter_buffer.binding(4)
+                extension_ray_buffer.binding(3),
+                hit_buffer.binding(4),
+                counter_buffer.binding(5)
             ],
         });
 
@@ -74,7 +77,7 @@ impl ShadeKernel {
         // create the pipeline
         let pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
-                label: Some("compute rest shader pipeline layout"),
+                label: Some("shade kernel shader pipeline layout"),
                 bind_group_layouts: &[
                     &image_buffer_bind_group_layout,
                     &scene_buffer_bind_group_layout,
@@ -85,7 +88,7 @@ impl ShadeKernel {
 
         let pipeline = device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("compute rest shader pipeline"),
+                label: Some("shade kernel pipeline"),
                 layout: Some(&pipeline_layout),
                 module: &shader,
                 entry_point: "main",
@@ -113,8 +116,7 @@ impl ShadeKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
     pub fn run(&self,
-               workgroup_size: (u32, u32),
-               counter_buffer: &GPUBuffer, read_buffer: &GPUBuffer) {
+               workgroup_size: (u32, u32)) {
 
         let device = self.wgpu_state.device();
         let queue = self.wgpu_state.queue();
@@ -141,9 +143,6 @@ impl ShadeKernel {
 
         }
         // queries.resolve(&mut encoder);
-        encoder.copy_buffer_to_buffer(counter_buffer.name(), 0,
-                                      read_buffer.name(), 0,
-                                      read_buffer.name().size());
         queue.submit(Some(encoder.finish()));
     }
 

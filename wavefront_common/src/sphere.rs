@@ -16,7 +16,7 @@ unsafe impl bytemuck::Zeroable for Sphere {}
 
 impl Sphere {
     pub fn new(center: Vec3, radius: f32, material_idx: u32, material_type: u32) -> Self {
-        Self { center: center.extend(0.0), radius, material_idx, material_type, _buffer: 0 }
+        Self { center: center.extend(1.0), radius, material_idx, material_type, _buffer: 0 }
     }
 
     pub fn get_aabb(&self) -> (Vec3, Vec3) {

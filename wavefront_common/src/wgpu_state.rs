@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use wgpu::Surface;
 use winit::window::Window;
+use crate::gpu_buffer::GPUBuffer;
 
 pub struct WgpuState {
     pub surface: RefCell<Surface<'static>>,
@@ -90,5 +91,39 @@ impl WgpuState {
         let mut y = self.surface_config.borrow_mut().height;
         y = new_size.1;
         self.surface.borrow_mut().configure(&self.device, &*self.surface_config.borrow());
+    }
+
+    pub fn copy_buffer_to_buffer(&self, from_buffer: &GPUBuffer, to_buffer: &GPUBuffer) {
+        let device = self.device();
+        let queue = self.queue();
+        let mut encoder = device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("swap encoder"),
+            });
+        encoder.clear_buffer(to_buffer.name(), 0, None);
+        encoder.copy_buffer_to_buffer(from_buffer.name(),
+                                      0,
+                                      to_buffer.name(),
+                                      0,
+                                      to_buffer.name().size());
+        encoder.clear_buffer(from_buffer.name(), 0, None);
+        queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn read_buffer(&self, from_buffer: &GPUBuffer) -> Vec::<u32> {
+        from_buffer.name()
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |_| ());
+        self.device().poll(wgpu::Maintain::wait()).panic_on_timeout();
+
+        let counter: Vec<u32> = {
+            let counter_view = from_buffer.name()
+                .slice(..)
+                .get_mapped_range();
+            bytemuck::cast_slice(&counter_view).to_vec()
+        };
+        from_buffer.name().unmap();
+
+        counter
     }
 }

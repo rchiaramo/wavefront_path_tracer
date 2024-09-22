@@ -12,7 +12,7 @@ use winit::error::EventLoopError;
 use winit::event_loop::{ControlFlow, EventLoop};
 use wavefront_common::camera::Camera;
 use wavefront_common::camera_controller::CameraController;
-use wavefront_common::parameters::{RenderParameters, SamplingParameters};
+use wavefront_common::parameters::RenderParameters;
 use wavefront_common::scene::Scene;
 
 use crate::app::App;
@@ -34,16 +34,13 @@ fn main() -> Result<(), EventLoopError> {
                                 4.0,
                                 0.1);
     let screen_size = (2880, 1620); // (1920, 1080) (3840, 2160)
-    let sampling_parameters = SamplingParameters::new(1,
-                                                      0,
-                                                      0,
-                                                      1);
+
     let render_parameters
         = RenderParameters::new(camera_controller, screen_size);
     
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::new(scene, render_parameters, sampling_parameters);
+    let mut app = App::new(scene, render_parameters);
     event_loop.run_app(&mut app)
 }

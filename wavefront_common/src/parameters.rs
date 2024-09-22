@@ -1,24 +1,8 @@
 use crate::camera_controller::CameraController;
 use crate::gpu_structs::GPUFrameBuffer;
 
-#[derive(Copy, Clone, PartialEq)]
-pub struct SamplingParameters {
-    pub samples_per_frame: u32,
-    pub num_bounces: u32,
-    pub clear_image_buffer: u32,
-    pub samples_per_pixel: u32
-}
-
-impl SamplingParameters {
-    pub fn new(samples_per_frame: u32, num_bounces: u32, clear_image_buffer: u32, samples_per_pixel: u32) -> Self {
-        Self {
-            samples_per_frame,
-            num_bounces,
-            clear_image_buffer,
-            samples_per_pixel
-        }
-    }
-}
+pub const SPP: u32 = 15;
+pub const SPF: u32 = 1;
 
 #[derive(Copy, Clone, PartialEq)]
 pub struct RenderParameters {
@@ -107,8 +91,8 @@ impl RenderProgress {
         self.frame = 0;
     }
 
-    pub fn progress(&self, spp: u32) -> f32 {
-        self.accumulated_samples as f32 / spp as f32
+    pub fn progress(&self) -> f32 {
+        self.accumulated_samples as f32 / SPP as f32
     }
 
     pub fn accumulated_samples(&self) -> u32 {

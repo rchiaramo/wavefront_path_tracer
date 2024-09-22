@@ -6,24 +6,26 @@ use crate::wgpu_state::WgpuState;
 pub struct GPUBuffer {
     name: Buffer,
     usage: BufferUsages,
-    wgpu_state: Rc<WgpuState>
+    wgpu_state: Rc<WgpuState>,
+    size: usize
 }
 
 
 impl GPUBuffer {
-    pub fn new(wgpu_state: Rc<WgpuState>, usage: BufferUsages, size: BufferAddress, label: Option<&str>)
+    pub fn new(wgpu_state: Rc<WgpuState>, usage: BufferUsages, size: usize, label: Option<&str>)
                -> Self {
         let device = wgpu_state.device();
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label,
-            size,
+            size: size as BufferAddress,
             usage,
             mapped_at_creation: false,
         });
         Self {
             name: buffer,
             usage,
-            wgpu_state
+            wgpu_state,
+            size
         }
     }
 
@@ -32,6 +34,7 @@ impl GPUBuffer {
                           data: &[u8],
                           label: Option<&str>) -> Self {
         let device = wgpu_state.device();
+        let size = data.len();
         let buffer = device.create_buffer_init(&BufferInitDescriptor {
             label,
             contents: data,
@@ -40,7 +43,8 @@ impl GPUBuffer {
         Self {
             name: buffer,
             usage,
-            wgpu_state
+            wgpu_state,
+            size
         }
     }
 
@@ -51,6 +55,15 @@ impl GPUBuffer {
     pub fn queue_for_gpu(&mut self, data: &[u8]) {
         let queue = self.wgpu_state.queue();
         queue.write_buffer(&self.name, 0, data);
+        queue.submit([]);
+    }
+
+    pub fn clear_buffer(&mut self) {
+        self.queue_for_gpu(bytemuck::cast_slice(&vec![0u32; self.size / 4]));
+    }
+
+    pub fn set_buffer_to_one(&mut self) {
+        self.queue_for_gpu(bytemuck::cast_slice(&vec![1f32; self.size / 4]));
     }
 
 

@@ -15,16 +15,17 @@ struct Sphere {
 }
 
 struct Ray {
-    origin: vec3f,
-    direction: vec3f,
+    origin: vec4f,
+    direction: vec4f,
     invDirection: vec3f,
+    pixel_idx: u32
 }
 
 struct HitPayload {
-    ray_idx: u32,
     t: f32,
+    ray_idx: u32,
     sphere_idx: u32,
-    mat_type: u32,
+    mat_type: u32
 }
 
 struct FrameBuffer {
@@ -53,16 +54,18 @@ fn main(@builtin(workgroup_id) workgroup_id: vec3u,
             workgroup_id.z * num_workgroups.x * num_workgroups.y;
     let idx = workgroup_index * 32u + local_index;
 
+    if idx >= counter_buffer[2] {
+        return;
+    }
+
     let ray = ray_buffer[idx];
     var payload = HitPayload();
 
-    // miss = 0, lambertian = 1, metal = 2, dielectric = 3
     if trace_ray(ray, &payload) {
         payload.ray_idx = idx;
-        // add one to payload.mat_type to account for miss counter in position 0
         hit_buffer[atomicAdd(&counter_buffer[1], 1u)] = payload;
     } else {
-        miss_buffer[atomicAdd(&counter_buffer[0], 1u)] = idx;
+        miss_buffer[atomicAdd(&counter_buffer[0], 1u)] = ray.pixel_idx;
     }
 }
 
@@ -183,24 +186,23 @@ fn hit(ray: Ray, sphere_idx: u32, t_min: f32, t_nearest: f32, payload: ptr<funct
     // checks if the ray intersects the sphere given by sphere_idx; if so, returns true and modifies
     // a hitPayload to give the details of the hit
     let sphere: Sphere = spheres[sphere_idx];
-    let sphere_center = sphere.center.xyz;
+    let sphere_center = sphere.center;
     let a: f32 = dot(ray.direction, ray.direction);
     let b: f32 = dot(ray.direction, ray.origin - sphere_center);
     let c: f32 = dot(ray.origin - sphere_center, ray.origin - sphere_center) -
         sphere.radius * sphere.radius;
     let discrim: f32 = b * b - a * c;
 
-
     if (discrim >= 0) {
         var t: f32 = (-b - sqrt(discrim)) / a;
         if (t > t_min && t < t_nearest) {
-            *payload = HitPayload(0, t, sphere_idx, sphere.mat_type);
+            *payload = HitPayload(t, 0, sphere_idx, sphere.mat_type);
             return true;
         }
 
         t = (-b + sqrt(discrim)) / a;
         if (t > t_min && t < t_nearest) {
-            *payload = HitPayload(0, t, sphere_idx, sphere.mat_type);
+            *payload = HitPayload(t, 0, sphere_idx, sphere.mat_type);
             return true;
         }
     }

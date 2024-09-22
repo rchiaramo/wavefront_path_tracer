@@ -112,8 +112,7 @@ impl ExtendKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
     pub fn run(&self,
-               workgroup_size: (u32, u32),
-               counter_buffer: &GPUBuffer, read_buffer: &GPUBuffer) {
+               workgroup_size: (u32, u32)) {
 
         let device = self.wgpu_state.device();
         let queue = self.wgpu_state.queue();
@@ -141,9 +140,6 @@ impl ExtendKernel {
 
         }
         // queries.resolve(&mut encoder);
-        encoder.copy_buffer_to_buffer(counter_buffer.name(), 0,
-                                      read_buffer.name(), 0,
-                                      read_buffer.name().size());
         queue.submit(Some(encoder.finish()));
     }
 

@@ -4,9 +4,10 @@ const FRAC_1_PI = 0.31830987f;
 const FRAC_PI_2 = 1.5707964f;
 
 struct Ray {
-    origin: vec3f,
-    direction: vec3f,
+    origin: vec4f,
+    direction: vec4f,
     invDirection: vec3f,
+    pixel_idx: u32
 }
 
 struct CameraData {
@@ -39,13 +40,24 @@ struct ViewBuffer {
 @group(1) @binding(3) var<uniform> view_matrix: ViewBuffer;
 
 @compute @workgroup_size(8,4,1)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-    let width = frame_buffer.width;
-    let height = frame_buffer.height;
-    let screen_pos = id.xy;
+fn main(@builtin(global_invocation_id) id: vec3u,
+        @builtin(workgroup_id) workgroup_id: vec3u,
+        @builtin(local_invocation_index) local_index: u32,
+        @builtin(num_workgroups) num_workgroups: vec3u) {
+    let workgroup_index = workgroup_id.x +
+                workgroup_id.y * num_workgroups.x +
+                workgroup_id.z * num_workgroups.x * num_workgroups.y;
+//    let idx = workgroup_index * 32u + local_index;
+
+    // generate rays is always called with the whole image dimension
+    // therefore the workgroups dispatched times the workgroup_size yield the width and height of the image
+    let width = num_workgroups.x * 8u;
+    let height = num_workgroups.y * 4u;
+//    let screen_pos = id.xy;
     let idx = id.x + id.y * width;
 
-    var rng_state:u32 = init_rng(screen_pos, vec2(width, height), frame_buffer.frame);
+
+    var rng_state:u32 = init_rng(id.xy, vec2(width, height), frame_buffer.frame);
     advance(&rng_state, frame_buffer.sample_number * 10u);
 
     var offset: vec3f = rng_next_vec3in_unit_disk(&rng_state);
@@ -56,14 +68,14 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     var proj_point = projection_matrix.invProj * vec4<f32>(ndc_point.xy, 1.0, 1.0);
     proj_point = proj_point / proj_point.w;
 
-    ray.origin = camera.pos.xyz;
+    ray.origin = camera.pos;
 
     if camera.defocusRadius > 0.0 {
         offset = rng_next_vec3in_unit_disk(&rng_state);
         var p_lens = vec4f((camera.defocusRadius * offset).xyz, 1.0);
         var lens_origin = view_matrix.view * p_lens;
         lens_origin = lens_origin / lens_origin.w;
-        ray.origin = lens_origin.xyz;
+        ray.origin = lens_origin;
 
         let tf = camera.focusDistance / proj_point.z;
         proj_point = tf * proj_point - p_lens;
@@ -71,8 +83,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
     let ray_dir = view_matrix.view * vec4<f32>(proj_point.xyz, 0.0);
 
-    ray.direction = normalize(ray_dir.xyz);
-    ray.invDirection = 1.0 / ray.direction;
+    ray.direction = normalize(ray_dir);
+    ray.invDirection = 1.0 / ray.direction.xyz;
+    ray.pixel_idx = idx;
 
     ray_buffer[idx] = ray;
 }
@@ -106,8 +119,7 @@ fn rng_next_vec3in_unit_sphere(state: ptr<function, u32>) -> vec3<f32> {
     // probability density is uniformly distributed over r^3
     let r = pow(rng_next_float(state), 0.33333f);
     // and need to distribute theta according to arccos(U[-1,1])
-    // let theta = acos(2f * rng_next_float(state) - 1.0);
-    let cos_theta = 2f * rng_next_float(state) - 1f;
+    let cos_theta = 1f - 2f * rng_next_float(state);
     let sin_theta = sqrt(1 - cos_theta * cos_theta);
     let phi = 2.0 * PI * rng_next_float(state);
 
@@ -133,10 +145,10 @@ fn init_rng(pixel: vec2<u32>, resolution: vec2<u32>, frame: u32) -> u32 {
 // the next int function returns an output function based on the LCG
 fn rng_next_int(state: ptr<function, u32>) -> u32 {
     // PCG hash RXS-M-XS
-    let old_state = *state * 747796405u + 2891336453u;  // LCG
-    *state = old_state;  // store this as the new state
+    let new_state = *state * 747796405u + 2891336453u;  // LCG
+    *state = new_state;  // store this as the new state
     // below is the output function for RXS-M-XS
-    let word = ((old_state >> ((old_state >> 28u) + 4u)) ^ old_state) * 277803737u;
+    let word = ((new_state >> ((new_state >> 28u) + 4u)) ^ new_state) * 277803737u;
     return (word >> 22u) ^ word;
 }
 

@@ -1,13 +1,16 @@
 
 struct Ray {
-    origin: vec3f,
-    direction: vec3f,
+    origin: vec4f,
+    direction: vec4f,
     invDirection: vec3f,
+    pixel_idx: u32
 }
 
 @group(0) @binding(0) var<storage, read_write> image_buffer: array<array<f32, 3>>;
 @group(0) @binding(1) var<storage, read> ray_buffer: array<Ray>;
 @group(0) @binding(2) var<storage, read_write> miss_buffer: array<u32>;
+@group(0) @binding(3) var<storage, read> counter_buffer: array<u32>;
+@group(0) @binding(4) var<storage, read_write> accumulated_image_buffer: array<array<f32, 3>>;
 
 @compute @workgroup_size(8,4,1)
 fn main(
@@ -18,14 +21,24 @@ fn main(
     let workgroup_index = workgroup_id.x +
         workgroup_id.y * num_workgroups.x +
         workgroup_id.z * num_workgroups.x * num_workgroups.y;
-    let ind = workgroup_index * 32u + local_index;
+    let idx = workgroup_index * 32u + local_index;
 
-    let ray_idx = miss_buffer[ind];
+    if idx >= counter_buffer[0] {
+        return;
+    }
+
+    let ray_idx = miss_buffer[idx];
     let ray = ray_buffer[ray_idx];
+    let pixel_idx = ray.pixel_idx;
+
     let a: f32 = 0.5 * (ray.direction.y + 1.0);
     let pixel_color = (1.0 - a) * vec3f(1.0, 1.0, 1.0) + a * vec3f(0.5, 0.7, 1.0);
 
-    image_buffer[ray_idx][0] = pixel_color.x;
-    image_buffer[ray_idx][1] = pixel_color.y;
-    image_buffer[ray_idx][2] = pixel_color.z;
+    image_buffer[pixel_idx][0] *= pixel_color.x;
+    image_buffer[pixel_idx][1] *= pixel_color.y;
+    image_buffer[pixel_idx][2] *= pixel_color.z;
+
+    accumulated_image_buffer[pixel_idx][0] += image_buffer[pixel_idx][0];
+    accumulated_image_buffer[pixel_idx][1] += image_buffer[pixel_idx][1];
+    accumulated_image_buffer[pixel_idx][2] += image_buffer[pixel_idx][2];
 }

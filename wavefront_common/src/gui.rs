@@ -5,7 +5,7 @@ use imgui_wgpu::{Renderer, RendererConfig};
 use imgui_winit_support::WinitPlatform;
 use wgpu::{Queue, SurfaceConfiguration};
 use winit::window::Window;
-use crate::parameters::{RenderParameters, SamplingParameters};
+use crate::parameters::RenderParameters;
 use crate::wgpu_state::WgpuState;
 
 pub struct GUI {

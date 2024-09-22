@@ -1,6 +1,4 @@
 use crate::path_tracer::PathTracer;
-use crate::query_gpu::{Queries, QueryResults};
-
 use std::sync::Arc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
@@ -9,7 +7,7 @@ use winit::event_loop::{ActiveEventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 use wavefront_common::frames_per_second::FramesPerSecond;
-use wavefront_common::parameters::{RenderParameters, SamplingParameters};
+use wavefront_common::parameters::{RenderParameters};
 use wavefront_common::scene::Scene;
 use wavefront_common::gui::GUI;
 use wavefront_common::wgpu_state::WgpuState;
@@ -21,20 +19,18 @@ pub struct App {
     gui: Option<GUI>,
     scene: Scene,
     render_parameters: RenderParameters,
-    sampling_parameters: SamplingParameters,
     last_render_time: Instant,
     frames_per_second: FramesPerSecond,
 }
 
 impl App {
-    pub fn new(scene: Scene, render_parameters: RenderParameters, sampling_parameters: SamplingParameters) -> Self {
+    pub fn new(scene: Scene, render_parameters: RenderParameters) -> Self {
         Self {
             window: None,
             path_tracer: None,
             gui: None,
             scene,
             render_parameters,
-            sampling_parameters,
             last_render_time: Instant::now(),
             frames_per_second: FramesPerSecond::new()
         }
@@ -66,8 +62,7 @@ impl ApplicationHandler for App {
                 window.clone(),
                 max_viewport_resolution,
                 &mut self.scene,
-                &self.render_parameters,
-                &self.sampling_parameters
+                &self.render_parameters
             );
 
             // let wgpu_state  = path_tracer.wgpu_state();
