@@ -1,4 +1,3 @@
-
 struct Ray {
     origin: vec4f,
     direction: vec4f,
@@ -10,7 +9,6 @@ struct Ray {
 @group(0) @binding(1) var<storage, read> ray_buffer: array<Ray>;
 @group(0) @binding(2) var<storage, read_write> miss_buffer: array<u32>;
 @group(0) @binding(3) var<storage, read> counter_buffer: array<u32>;
-@group(0) @binding(4) var<storage, read_write> accumulated_image_buffer: array<array<f32, 3>>;
 
 @compute @workgroup_size(8,4,1)
 fn main(
@@ -37,8 +35,4 @@ fn main(
     image_buffer[pixel_idx][0] *= pixel_color.x;
     image_buffer[pixel_idx][1] *= pixel_color.y;
     image_buffer[pixel_idx][2] *= pixel_color.z;
-
-    accumulated_image_buffer[pixel_idx][0] += image_buffer[pixel_idx][0];
-    accumulated_image_buffer[pixel_idx][1] += image_buffer[pixel_idx][1];
-    accumulated_image_buffer[pixel_idx][2] += image_buffer[pixel_idx][2];
 }

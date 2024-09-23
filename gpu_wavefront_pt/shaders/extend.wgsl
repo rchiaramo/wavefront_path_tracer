@@ -65,7 +65,7 @@ fn main(@builtin(workgroup_id) workgroup_id: vec3u,
         payload.ray_idx = idx;
         hit_buffer[atomicAdd(&counter_buffer[1], 1u)] = payload;
     } else {
-        miss_buffer[atomicAdd(&counter_buffer[0], 1u)] = ray.pixel_idx;
+        miss_buffer[atomicAdd(&counter_buffer[0], 1u)] = idx;
     }
 }
 

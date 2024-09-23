@@ -9,6 +9,7 @@ use wavefront_common::ray::Ray;
 use wgpu::{BufferAddress, BufferUsages};
 use winit::event::WindowEvent;
 use wavefront_common::wgpu_state::WgpuState;
+use crate::accumulate::AccumulateKernel;
 use crate::shade::ShadeKernel;
 use crate::display::DisplayKernel;
 use crate::extend::ExtendKernel;
@@ -36,6 +37,7 @@ pub struct PathTracer {
     extend_kernel: ExtendKernel,
     shade_kernel: ShadeKernel,
     miss_kernel: MissKernel,
+    accumulate_kernel: AccumulateKernel,
     display_kernel: DisplayKernel,
     render_parameters: RenderParameters,
     render_progress: RenderProgress
@@ -68,7 +70,7 @@ impl PathTracer {
 
         // create the frame_buffer
         let frame_buffer = GPUBuffer::new(Rc::clone(&wgpu_state),
-                                          BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                                          BufferUsages::UNIFORM | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
                                           16,
                                           Some("frame buffer"));
 
@@ -192,7 +194,12 @@ impl PathTracer {
         let miss_kernel
             = MissKernel::new(Rc::clone(&wgpu_state), &image_buffer,
                               &ray_buffer, &miss_buffer,
-                              &counter_buffer, &accumulated_image_buffer);
+                              &counter_buffer);
+
+        let accumulate_kernel
+            = AccumulateKernel::new(Rc::clone(&wgpu_state),
+                                    &image_buffer,
+                                    &accumulated_image_buffer);
 
         let display_kernel
             = DisplayKernel::new(Rc::clone(&wgpu_state), &accumulated_image_buffer, &frame_buffer);
@@ -218,6 +225,7 @@ impl PathTracer {
             extend_kernel,
             shade_kernel,
             miss_kernel,
+            accumulate_kernel,
             display_kernel,
             render_parameters,
             render_progress
@@ -252,20 +260,11 @@ impl PathTracer {
         }
 
         // otherwise something changed
-        let (w, h) = self.render_parameters.viewport_size();
-        // clear the image buffer
-        self.image_buffer.set_buffer_to_one();
 
-        // counter is [misses, hits, extension_rays, shadow_rays]
-        // first time through loop make sure extension_rays is all rays
-        let mut counter = vec![0u32; 16];
-        counter[2] = w * h;
-        self.counter_buffer.queue_for_gpu(bytemuck::cast_slice(&counter));
+        // clear the accumulated image buffer
+        self.accumulated_image_buffer.clear_buffer();
 
-        // clear the ray_buffer
-        self.ray_buffer.clear_buffer();
-        self.extension_ray_buffer.clear_buffer();
-
+        // get the possibly updated camera_controller
         let camera_controller = self.render_parameters.camera_controller();
 
         // if the camera position or orientation changed, update the view matrix and the camera itself
@@ -281,6 +280,7 @@ impl PathTracer {
         self.camera_buffer.queue_for_gpu(bytemuck::cast_slice(&[gpu_camera]));
 
         // update the projection matrix
+        let (w, h) = self.render_parameters.viewport_size();
         let ar = w as f32 / h as f32;
         let (z_near, z_far) = camera_controller.get_clip_planes();
         let proj_mat = ProjectionMatrix::new(camera_controller.vfov_rad(), ar, z_near, z_far).p_inv();
@@ -311,22 +311,30 @@ impl PathTracer {
                 frame.set_sample_number(sample_number);
                 self.frame_buffer.queue_for_gpu(bytemuck::cast_slice(&[frame]));
 
+                // fundamental rendering loop
+                // remember this gets called every frame and renders the whole scene,
+                // accumulating pixel color
+                // therefore, we generate new initial rays every time here
+
+                // clear the image buffer
+                self.image_buffer.set_buffer_to_one();
+
+                // clear the ray buffers
+                self.ray_buffer.clear_buffer();
+                self.extension_ray_buffer.clear_buffer();
+
+                // set the counter buffer initially to run through the entire image
                 let (width, height) = self.render_parameters.viewport_size();
                 let mut counter = vec![0u32; 16];
                 counter[2] = width * height;
                 self.counter_buffer.queue_for_gpu(bytemuck::cast_slice(&counter));
 
-                // fundamental rendering loop
-                // remember this gets called every frame and renders the whole scene,
-                // accumulating pixel color
-                // therefore, we generate new initial rays every time here
-                self.ray_buffer.clear_buffer();
                 self.generate_ray_kernel.run(workgroup_size(width * height));
 
                 // the wavefront loop starts here; this is like the old num_bounces
                 let mut wavefront = 0;
                 let mut extend_size = workgroup_size(width * height);
-                while wavefront < 30 {
+                while wavefront < 50 {
                     self.extend_kernel.run(extend_size);
 
                     self.wgpu_state.copy_buffer_to_buffer(&self.counter_buffer, &self.counter_read_buffer);
@@ -334,6 +342,7 @@ impl PathTracer {
 
                     let num_misses = counter[0];
                     let num_hits = counter[1];
+                    if num_misses < 50 { println!("wavefront {wavefront}"); break }
 
                     // after we know number of hits and misses, reset the ray counter
                     counter[2] = 0;
@@ -358,7 +367,8 @@ impl PathTracer {
                 }
                 // sloppy solution right now, but I'm double using the sample_number for the display shader
                 // by storing the total accumulated samples in that variable
-                self.render_progress.incr_accumulated_samples(samples_per_frame);
+                self.accumulate_kernel.run(workgroup_size(width * height));
+                self.render_progress.incr_accumulated_samples(1);
                 frame.set_sample_number(self.render_progress.accumulated_samples());
                 self.frame_buffer.queue_for_gpu(bytemuck::cast_slice(&[frame]));
             }

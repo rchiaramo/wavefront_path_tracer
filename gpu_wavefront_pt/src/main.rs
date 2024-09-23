@@ -6,6 +6,7 @@ mod shade;
 mod display;
 mod miss;
 mod extend;
+mod accumulate;
 
 use glam::Vec3;
 use winit::error::EventLoopError;

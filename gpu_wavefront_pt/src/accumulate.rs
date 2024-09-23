@@ -4,53 +4,47 @@ use wavefront_common::gpu_buffer::GPUBuffer;
 use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::{Queries, QueryResults};
 
-pub struct MissKernel {
+pub struct AccumulateKernel {
     wgpu_state: Rc<WgpuState>,
-    miss_buffer_bind_group: BindGroup,
+    buffer_bind_group: BindGroup,
     pipeline: ComputePipeline,
     timing_query: Queries
 }
 
-impl MissKernel {
+impl AccumulateKernel {
     // on initialization, a kernel needs to:
     // create bind group layout and bind group
     // load a shader
     // create a pipeline layout and a pipeline
     pub fn new(wgpu_state: Rc<WgpuState>,
                image_buffer: &GPUBuffer,
-               ray_buffer: &GPUBuffer,
-               miss_buffer: &GPUBuffer,
-               counter_buffer: &GPUBuffer) -> Self {
+               accumultated_image_buffer: &GPUBuffer) -> Self {
         // load the kernel
         let device = wgpu_state.device();
         let shader = device.create_shader_module(
-            wgpu::include_wgsl!("../shaders/miss_kernel.wgsl"));
+            wgpu::include_wgsl!("../shaders/accumulate.wgsl"));
 
         // create the bind group
-        let miss_buffer_bind_group_layout = device.create_bind_group_layout(
+        let buffer_bind_group_layout = device.create_bind_group_layout(
             &BindGroupLayoutDescriptor{
-                label: Some("miss buffer bind group layout"),
+                label: Some("accumulate buffer bind group layout"),
                 entries: &[image_buffer.layout(ShaderStages::COMPUTE, 0, false),
-                    ray_buffer.layout(ShaderStages::COMPUTE, 1, true),
-                    miss_buffer.layout(ShaderStages::COMPUTE, 2,false),
-                    counter_buffer.layout(ShaderStages::COMPUTE, 3, true)
+                    accumultated_image_buffer.layout(ShaderStages::COMPUTE, 1, false),
                 ],
             });
-        let miss_buffer_bind_group = device.create_bind_group(&BindGroupDescriptor{
-            label: Some("ray buffer bind group"),
-            layout: &miss_buffer_bind_group_layout,
+        let buffer_bind_group = device.create_bind_group(&BindGroupDescriptor{
+            label: Some("accumulate buffer bind group"),
+            layout: &buffer_bind_group_layout,
             entries: &[image_buffer.binding(0),
-                ray_buffer.binding(1),
-                miss_buffer.binding(2),
-                counter_buffer.binding(3)],
+                accumultated_image_buffer.binding(1)],
         });
 
         // create the pipeline
         let pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
-                label: Some("miss shader pipeline layout"),
+                label: Some("accumulate kernel pipeline layout"),
                 bind_group_layouts: &[
-                    &miss_buffer_bind_group_layout,
+                    &buffer_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             }
@@ -58,7 +52,7 @@ impl MissKernel {
 
         let pipeline = device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("miss shader pipeline"),
+                label: Some("accumulate shader pipeline"),
                 layout: Some(&pipeline_layout),
                 module: &shader,
                 entry_point: "main",
@@ -69,7 +63,7 @@ impl MissKernel {
 
         Self {
             wgpu_state: Rc::clone(&wgpu_state),
-            miss_buffer_bind_group,
+            buffer_bind_group,
             pipeline,
             timing_query: Queries::new(device, QueryResults::NUM_QUERIES)
         }
@@ -91,12 +85,12 @@ impl MissKernel {
         let queue = self.wgpu_state.queue();
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
-                label: Some("miss kernel encoder"),
+                label: Some("accumulate kernel encoder"),
             });
 
         {
             let mut miss_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("miss pass"),
+                label: Some("accumulate pass"),
                 timestamp_writes: None
                 // timestamp_writes: Some(ComputePassTimestampWrites {
                 //     query_set: &queries.set,
@@ -106,7 +100,7 @@ impl MissKernel {
             });
             // queries.next_unused_query += 2;
             miss_pass.set_pipeline(&self.pipeline);
-            miss_pass.set_bind_group(0, &self.miss_buffer_bind_group, &[]);
+            miss_pass.set_bind_group(0, &self.buffer_bind_group, &[]);
             miss_pass.dispatch_workgroups(workgroup_size.0, workgroup_size.1, 1);
 
         }
