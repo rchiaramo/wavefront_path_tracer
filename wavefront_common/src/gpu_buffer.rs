@@ -51,6 +51,7 @@ impl GPUBuffer {
     pub fn name(&self) -> &Buffer {
         &self.name
     }
+    pub fn size(&self) -> usize { self.size }
 
     pub fn queue_for_gpu(&mut self, data: &[u8]) {
         let queue = self.wgpu_state.queue();
@@ -61,11 +62,6 @@ impl GPUBuffer {
     pub fn clear_buffer(&mut self) {
         self.queue_for_gpu(bytemuck::cast_slice(&vec![0u32; self.size / 4]));
     }
-
-    pub fn set_buffer_to_one(&mut self) {
-        self.queue_for_gpu(bytemuck::cast_slice(&vec![1f32; self.size / 4]));
-    }
-
 
     pub fn layout(&self, visibility: ShaderStages, binding_idx: u32, read_only: bool) -> BindGroupLayoutEntry {
         let mut buffer_binding_type: BufferBindingType = Default::default();

@@ -1,15 +1,16 @@
 use std::rc::Rc;
-use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderStages};
+use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Maintain, MaintainBase, Queue, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
 use wavefront_common::wgpu_state::WgpuState;
-use crate::query_gpu::Queries;
+use crate::query_gpu::{Queries, QueryResults};
 
 pub struct GenerateRayKernel {
     wgpu_state: Rc<WgpuState>,
     ray_buffer_bind_group: BindGroup,
     parameters_buffer_bind_group: BindGroup,
     pipeline: ComputePipeline,
-    timing_query: Queries
+    timing_query: Queries,
+    query_results: QueryResults,
 }
 
 impl GenerateRayKernel {
@@ -89,7 +90,8 @@ impl GenerateRayKernel {
             ray_buffer_bind_group,
             parameters_buffer_bind_group,
             pipeline,
-            timing_query: Queries::new(device, 2),
+            timing_query: Queries::new(device, QueryResults::NUM_QUERIES),
+            query_results: QueryResults::new()
         }
     }
 
@@ -103,34 +105,45 @@ impl GenerateRayKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, workgroup_size: (u32, u32)) {
+    pub fn run(&mut self, workgroup_size: (u32, u32)) {
         let device = self.wgpu_state.device();
         let queue = self.wgpu_state.queue();
+        self.timing_query.next_unused_query = 0;
+
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("generate ray kernel encoder"),
             });
 
-
+        encoder.write_timestamp(&self.timing_query.set, self.timing_query.next_unused_query);
+        self.timing_query.next_unused_query += 1;
         {
             let mut generate_rays_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("generate rays pass"),
-                timestamp_writes: None
-                // timestamp_writes: Some(ComputePassTimestampWrites {
-                //     query_set: &queries.set,
-                //     beginning_of_pass_write_index: Some(queries.next_unused_query),
-                //     end_of_pass_write_index: Some(queries.next_unused_query + 1),
-                // })
+                timestamp_writes: Some(ComputePassTimestampWrites {
+                    query_set: &self.timing_query.set,
+                    beginning_of_pass_write_index: Some(self.timing_query.next_unused_query),
+                    end_of_pass_write_index: Some(self.timing_query.next_unused_query + 1),
+                })
             });
-            // queries.next_unused_query += 2;
+            self.timing_query.next_unused_query += 2;
             generate_rays_pass.set_pipeline(&self.pipeline);
             generate_rays_pass.set_bind_group(0, &self.ray_buffer_bind_group, &[]);
             generate_rays_pass.set_bind_group(1, &self.parameters_buffer_bind_group, &[]);
             generate_rays_pass.dispatch_workgroups(workgroup_size.0, workgroup_size.1, 1);
 
         }
-        // queries.resolve(&mut encoder);
-        queue.submit(Some(encoder.finish()));
+        encoder.write_timestamp(&self.timing_query.set, self.timing_query.next_unused_query);
+        self.timing_query.next_unused_query += 1;
+        self.timing_query.resolve(&mut encoder);
+        let idx = queue.submit(Some(encoder.finish()));
+        device.poll(Maintain::WaitForSubmissionIndex(idx));
+    }
+
+    pub fn get_timing(&mut self) -> f32 {
+        self.query_results.process_raw_results(&self.wgpu_state.queue(),
+            self.timing_query.wait_for_results(&self.wgpu_state.device()));
+        self.query_results.get_running_avg()
     }
 }
 

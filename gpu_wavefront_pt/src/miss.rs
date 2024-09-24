@@ -8,7 +8,8 @@ pub struct MissKernel {
     wgpu_state: Rc<WgpuState>,
     miss_buffer_bind_group: BindGroup,
     pipeline: ComputePipeline,
-    timing_query: Queries
+    timing_query: Queries,
+    query_results: QueryResults
 }
 
 impl MissKernel {
@@ -71,7 +72,8 @@ impl MissKernel {
             wgpu_state: Rc::clone(&wgpu_state),
             miss_buffer_bind_group,
             pipeline,
-            timing_query: Queries::new(device, QueryResults::NUM_QUERIES)
+            timing_query: Queries::new(device, QueryResults::NUM_QUERIES),
+            query_results: QueryResults::new()
         }
     }
 
@@ -85,34 +87,44 @@ impl MissKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&self, workgroup_size: (u32, u32)) {
+    pub fn run(&mut self, workgroup_size: (u32, u32)) {
 
         let device = self.wgpu_state.device();
         let queue = self.wgpu_state.queue();
+        self.timing_query.next_unused_query = 0;
+
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("miss kernel encoder"),
             });
 
+        encoder.write_timestamp(&self.timing_query.set, self.timing_query.next_unused_query);
+        self.timing_query.next_unused_query += 1;
         {
             let mut miss_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("miss pass"),
-                timestamp_writes: None
-                // timestamp_writes: Some(ComputePassTimestampWrites {
-                //     query_set: &queries.set,
-                //     beginning_of_pass_write_index: Some(queries.next_unused_query),
-                //     end_of_pass_write_index: Some(queries.next_unused_query + 1),
-                // })
+                timestamp_writes: Some(ComputePassTimestampWrites {
+                    query_set: &self.timing_query.set,
+                    beginning_of_pass_write_index: Some(self.timing_query.next_unused_query),
+                    end_of_pass_write_index: Some(self.timing_query.next_unused_query + 1),
+                })
             });
-            // queries.next_unused_query += 2;
+            self.timing_query.next_unused_query += 2;
             miss_pass.set_pipeline(&self.pipeline);
             miss_pass.set_bind_group(0, &self.miss_buffer_bind_group, &[]);
             miss_pass.dispatch_workgroups(workgroup_size.0, workgroup_size.1, 1);
 
         }
-        // queries.resolve(&mut encoder);
+        encoder.write_timestamp(&self.timing_query.set, self.timing_query.next_unused_query);
+        self.timing_query.next_unused_query += 1;
+        self.timing_query.resolve(&mut encoder);
         queue.submit(Some(encoder.finish()));
     }
 
+    pub fn get_timing(&mut self) -> f32 {
+        self.query_results.process_raw_results(&self.wgpu_state.queue(),
+                                               self.timing_query.wait_for_results(&self.wgpu_state.device()));
+        self.query_results.get_running_avg()
+    }
 }
 

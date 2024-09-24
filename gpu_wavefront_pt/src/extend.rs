@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderStages};
+use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Maintain, Queue, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
 use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::{Queries, QueryResults};
@@ -10,6 +10,7 @@ pub struct ExtendKernel {
     scene_buffer_bind_group: BindGroup,
     pipeline: ComputePipeline,
     timing_query: Queries,
+    query_results: QueryResults,
 }
 
 impl ExtendKernel {
@@ -98,7 +99,8 @@ impl ExtendKernel {
             extend_shader_bind_group,
             scene_buffer_bind_group,
             pipeline,
-            timing_query: Queries::new(device, QueryResults::NUM_QUERIES)
+            timing_query: Queries::new(device, QueryResults::NUM_QUERIES),
+            query_results: QueryResults::new()
         }
     }
 
@@ -111,37 +113,47 @@ impl ExtendKernel {
     // do the version of execute (dispatch workgroups vs draw)
     // submit the encoder through the queue
     // possibly present the output (display kernel)
-    pub fn run(&self,
+    pub fn run(&mut self,
                workgroup_size: (u32, u32)) {
 
         let device = self.wgpu_state.device();
         let queue = self.wgpu_state.queue();
+        self.timing_query.next_unused_query = 0;
 
         let mut encoder = device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
                 label: Some("extend kernel encoder"),
             });
 
+        encoder.write_timestamp(&self.timing_query.set, self.timing_query.next_unused_query);
+        self.timing_query.next_unused_query += 1;
         {
             let mut extend_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("compute rest pass"),
-                timestamp_writes: None
-                // timestamp_writes: Some(ComputePassTimestampWrites {
-                //     query_set: &queries.set,
-                //     beginning_of_pass_write_index: Some(queries.next_unused_query),
-                //     end_of_pass_write_index: Some(queries.next_unused_query + 1),
-                // })
+                timestamp_writes: Some(ComputePassTimestampWrites {
+                    query_set: &self.timing_query.set,
+                    beginning_of_pass_write_index: Some(self.timing_query.next_unused_query),
+                    end_of_pass_write_index: Some(self.timing_query.next_unused_query + 1),
+                })
             });
-            // queries.next_unused_query += 2;
+            self.timing_query.next_unused_query += 2;
             extend_pass.set_pipeline(&self.pipeline);
             extend_pass.set_bind_group(0, &self.extend_shader_bind_group, &[]);
             extend_pass.set_bind_group(1, &self.scene_buffer_bind_group, &[]);
             extend_pass.dispatch_workgroups(workgroup_size.0, workgroup_size.1, 1);
 
         }
-        // queries.resolve(&mut encoder);
-        queue.submit(Some(encoder.finish()));
+        encoder.write_timestamp(&self.timing_query.set, self.timing_query.next_unused_query);
+        self.timing_query.next_unused_query += 1;
+        self.timing_query.resolve(&mut encoder);
+        let idx = queue.submit(Some(encoder.finish()));
+        device.poll(Maintain::WaitForSubmissionIndex(idx));
     }
 
+    pub fn get_timing(&mut self) -> f32 {
+        self.query_results.process_raw_results(&self.wgpu_state.queue(),
+                                               self.timing_query.wait_for_results(&self.wgpu_state.device()));
+        self.query_results.get_running_avg()
+    }
 }
 

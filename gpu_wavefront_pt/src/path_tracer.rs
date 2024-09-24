@@ -6,7 +6,7 @@ use wavefront_common::parameters::{RenderParameters, RenderProgress, SPF, SPP};
 use wavefront_common::projection_matrix::ProjectionMatrix;
 use wavefront_common::scene::Scene;
 use wavefront_common::ray::Ray;
-use wgpu::{BufferAddress, BufferUsages};
+use wgpu::{BufferUsages, Device, Maintain};
 use winit::event::WindowEvent;
 use wavefront_common::wgpu_state::WgpuState;
 use crate::accumulate::AccumulateKernel;
@@ -262,7 +262,8 @@ impl PathTracer {
         // otherwise something changed
 
         // clear the accumulated image buffer
-        self.accumulated_image_buffer.clear_buffer();
+        let size = self.accumulated_image_buffer.size() / 12;
+        self.accumulated_image_buffer.queue_for_gpu(bytemuck::cast_slice(&vec![[0f32; 3]; size]));
 
         // get the possibly updated camera_controller
         let camera_controller = self.render_parameters.camera_controller();
@@ -317,7 +318,8 @@ impl PathTracer {
                 // therefore, we generate new initial rays every time here
 
                 // clear the image buffer
-                self.image_buffer.set_buffer_to_one();
+                let size = self.image_buffer.size() / 12;
+                self.image_buffer.queue_for_gpu(bytemuck::cast_slice(&vec![[1f32; 3]; size]));
 
                 // clear the ray buffers
                 self.ray_buffer.clear_buffer();
@@ -329,12 +331,13 @@ impl PathTracer {
                 counter[2] = width * height;
                 self.counter_buffer.queue_for_gpu(bytemuck::cast_slice(&counter));
 
-                self.generate_ray_kernel.run(workgroup_size(width * height));
+                self.generate_ray_kernel.run((width / 8, height / 8));
 
                 // the wavefront loop starts here; this is like the old num_bounces
                 let mut wavefront = 0;
                 let mut extend_size = workgroup_size(width * height);
                 while wavefront < 50 {
+
                     self.extend_kernel.run(extend_size);
 
                     self.wgpu_state.copy_buffer_to_buffer(&self.counter_buffer, &self.counter_read_buffer);
@@ -364,11 +367,18 @@ impl PathTracer {
 
                     self.counter_buffer.queue_for_gpu(bytemuck::cast_slice(&[0u32, 0, num_extension, 0]));
                     wavefront += 1;
+
                 }
+                let gr_timing = self.generate_ray_kernel.get_timing();
+                let er_timing = self.extend_kernel.get_timing();
+                let sh_timing = self.shade_kernel.get_timing();
+                let miss_timing = self.miss_kernel.get_timing();
                 // sloppy solution right now, but I'm double using the sample_number for the display shader
                 // by storing the total accumulated samples in that variable
                 self.accumulate_kernel.run(workgroup_size(width * height));
                 self.render_progress.incr_accumulated_samples(1);
+                println!("sample: {} total: {} gr: {gr_timing} er: {er_timing} sh: {sh_timing} miss: {miss_timing}",
+                         self.render_progress.accumulated_samples(), gr_timing+er_timing+sh_timing+miss_timing);
                 frame.set_sample_number(self.render_progress.accumulated_samples());
                 self.frame_buffer.queue_for_gpu(bytemuck::cast_slice(&[frame]));
             }

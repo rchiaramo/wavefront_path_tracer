@@ -1,8 +1,8 @@
 use crate::camera_controller::CameraController;
 use crate::gpu_structs::GPUFrameBuffer;
 
-pub const SPP: u32 = 4;
-pub const SPF: u32 = 2;
+pub const SPP: u32 = 10;
+pub const SPF: u32 = 1;
 
 #[derive(Copy, Clone, PartialEq)]
 pub struct RenderParameters {

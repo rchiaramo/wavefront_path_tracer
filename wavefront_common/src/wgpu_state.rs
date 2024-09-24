@@ -41,7 +41,24 @@ impl WgpuState {
             }
         ).await.expect("Failed to find an appropriate adapter");
 
-        let features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+        let features = adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+        // if features.contains(wgpu::Features::BGRA8UNORM_STORAGE)
+        // {
+        //     println!("Adapter has bgra8unorm storage");
+        // } else {
+        //     println!("Adapter does not have this storage");
+        // }
+        // if features.contains(wgpu::Features::TIMESTAMP_QUERY) {
+        //     println!("Adapter supports timestamp queries.");
+        // } else {
+        //     println!("Adapter does not support timestamp queries, aborting.");
+        // }
+        // let timestamps_inside_passes = features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+        // if timestamps_inside_passes {
+        //     println!("Adapter supports timestamp queries within encoders.");
+        // } else {
+        //     println!("Adapter does not support timestamp queries within encoders.");
+        // }
         let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
                 required_features: features,
@@ -86,11 +103,13 @@ impl WgpuState {
 
     pub fn resize(&self, new_size: (u32, u32))
     {
-        let mut x = self.surface_config.borrow_mut().width;
-        x = new_size.0;
-        let mut y = self.surface_config.borrow_mut().height;
-        y = new_size.1;
-        self.surface.borrow_mut().configure(&self.device, &*self.surface_config.borrow());
+        {
+            let mut surf_conf = self.surface_config.borrow_mut();
+            surf_conf.width = new_size.0;
+            surf_conf.height = new_size.1;
+        }
+        let mut surface = self.surface.borrow_mut();
+        surface.configure(&self.device, &self.surface_config.borrow());
     }
 
     pub fn copy_buffer_to_buffer(&self, from_buffer: &GPUBuffer, to_buffer: &GPUBuffer) {

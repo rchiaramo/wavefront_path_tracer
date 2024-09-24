@@ -7,6 +7,7 @@ mod display;
 mod miss;
 mod extend;
 mod accumulate;
+mod kernel;
 
 use glam::Vec3;
 use winit::error::EventLoopError;

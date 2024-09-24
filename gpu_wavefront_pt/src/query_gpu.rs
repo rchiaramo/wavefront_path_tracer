@@ -3,20 +3,22 @@ use wgpu::Queue;
 
 #[derive(Default)]
 pub struct QueryResults {
-    compute_start_end_timestamps: [u64; 2],
+    compute_start_end_timestamps: [u64; 4],
     running_avg: VecDeque<f64>
 }
 
 impl QueryResults {
     // Queries:
+    // * encoder start
     // * compute start
     // * compute end
-    pub const NUM_QUERIES: u64 = 2;
+    // * encoder end
+    pub const NUM_QUERIES: u64 = 4;
     pub const RUNNING_AVG_LENGTH: usize = 10;
 
     pub fn new() -> Self {
         Self {
-            compute_start_end_timestamps: [0u64; 2],
+            compute_start_end_timestamps: [0u64; 4],
             running_avg: VecDeque::<f64>::with_capacity(Self::RUNNING_AVG_LENGTH)
         }
     }
@@ -30,7 +32,9 @@ impl QueryResults {
         if self.running_avg.len() == Self::RUNNING_AVG_LENGTH {
             self.running_avg.pop_back();
         }
-        self.running_avg.push_front(elapsed_us(timestamps[0], timestamps[1]));
+        if timestamps[1] != 0 && timestamps[2] != 0 {
+            self.running_avg.push_front(elapsed_us(timestamps[1], timestamps[2]));
+        }
     }
 
     pub fn get_running_avg(&self) -> f32 {

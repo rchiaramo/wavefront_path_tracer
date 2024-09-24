@@ -39,26 +39,26 @@ struct ViewBuffer {
 @group(1) @binding(2) var<uniform> projection_matrix: ProjectionBuffer;
 @group(1) @binding(3) var<uniform> view_matrix: ViewBuffer;
 
-@compute @workgroup_size(8,4,1)
+@compute @workgroup_size(8,8,1)
 fn main(@builtin(global_invocation_id) id: vec3u,
         @builtin(workgroup_id) workgroup_id: vec3u,
         @builtin(local_invocation_index) local_index: u32,
         @builtin(num_workgroups) num_workgroups: vec3u) {
-    let workgroup_index = workgroup_id.x +
-                workgroup_id.y * num_workgroups.x +
-                workgroup_id.z * num_workgroups.x * num_workgroups.y;
-//    let idx = workgroup_index * 32u + local_index;
+//    let workgroup_index = workgroup_id.x +
+//                workgroup_id.y * num_workgroups.x +
+//                workgroup_id.z * num_workgroups.x * num_workgroups.y;
+//    let idx = workgroup_index * 64u + local_index;
 
     // generate rays is always called with the whole image dimension
     // therefore the workgroups dispatched times the workgroup_size yield the width and height of the image
     let width = num_workgroups.x * 8u;
-    let height = num_workgroups.y * 4u;
+    let height = num_workgroups.y * 8u;
 //    let screen_pos = id.xy;
     let idx = id.x + id.y * width;
 
 
     var rng_state:u32 = init_rng(id.xy, vec2(width, height), frame_buffer.frame);
-    advance(&rng_state, frame_buffer.sample_number * 10u);
+//    advance(&rng_state, frame_buffer.sample_number * 10u);
 
     var offset: vec3f = rng_next_vec3in_unit_disk(&rng_state);
     var ray: Ray;
