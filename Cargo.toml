@@ -1,7 +1,6 @@
 [workspace]
 
 members = [
-    "cpu_wavefront_pt",
     "gpu_wavefront_pt",
     "wavefront_common",
 ]

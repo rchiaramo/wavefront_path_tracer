@@ -6,7 +6,7 @@ use wavefront_common::parameters::{RenderParameters, RenderProgress, SPF, SPP};
 use wavefront_common::projection_matrix::ProjectionMatrix;
 use wavefront_common::scene::Scene;
 use wavefront_common::ray::Ray;
-use wgpu::{BufferUsages, Device, Maintain};
+use wgpu::{BufferUsages};
 use winit::event::WindowEvent;
 use wavefront_common::wgpu_state::WgpuState;
 use crate::display::DisplayKernel;
@@ -278,15 +278,6 @@ impl PathTracer {
 
     pub fn run(&mut self) {
         self.update_buffers();
-
-        let workgroup_size = |x:u32| {
-            let x_over_32 = x.div_ceil(32);
-            let y = (x_over_32 as f32).sqrt().ceil() as u32;
-            let fac = (1..y).rev().find(|z| { x_over_32 % z == 0 }).unwrap();
-            if (x_over_32 / fac) >= (1<<16) { (y, y) } else {
-                (fac, x_over_32 / fac)
-            }
-        };
 
         let workgroup_size_64 = |x:u32| {
             let x_over_64 = x.div_ceil(64);
