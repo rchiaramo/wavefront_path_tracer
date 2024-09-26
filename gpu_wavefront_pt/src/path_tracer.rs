@@ -9,12 +9,8 @@ use wavefront_common::ray::Ray;
 use wgpu::{BufferUsages, Device, Maintain};
 use winit::event::WindowEvent;
 use wavefront_common::wgpu_state::WgpuState;
-use crate::accumulate::AccumulateKernel;
-use crate::shade::ShadeKernel;
 use crate::display::DisplayKernel;
-use crate::extend::ExtendKernel;
-use crate::generate_ray::GenerateRayKernel;
-use crate::miss::MissKernel;
+use crate::kernel::Kernel;
 
 pub struct PathTracer {
     wgpu_state: Rc<WgpuState>,
@@ -33,11 +29,11 @@ pub struct PathTracer {
     camera_buffer: GPUBuffer,
     projection_buffer: GPUBuffer,
     view_buffer: GPUBuffer,
-    generate_ray_kernel: GenerateRayKernel,
-    extend_kernel: ExtendKernel,
-    shade_kernel: ShadeKernel,
-    miss_kernel: MissKernel,
-    accumulate_kernel: AccumulateKernel,
+    generate_ray_kernel: Kernel,
+    extend_kernel: Kernel,
+    shade_kernel: Kernel,
+    miss_kernel: Kernel,
+    accumulate_kernel: Kernel,
     display_kernel: DisplayKernel,
     render_parameters: RenderParameters,
     render_progress: RenderProgress
@@ -160,46 +156,34 @@ impl PathTracer {
                                                     Some("view buffer"));
 
         let render_progress = RenderProgress::new();
+        let mut buffer_list = vec![vec![&ray_buffer], vec![&frame_buffer, &camera_buffer, &projection_buffer, &view_buffer]];
+        let mut read_flag = vec![vec![false], vec![false, false, false, false]];
 
-        let generate_ray_kernel
-            = GenerateRayKernel::new(Rc::clone(&wgpu_state),
-                                     &ray_buffer,
-                                     &frame_buffer,
-                                     &camera_buffer,
-                                     &projection_buffer,
-                                     &view_buffer);
+        let generate_ray_kernel = Kernel::new("generate_rays", Rc::clone(&wgpu_state), buffer_list, read_flag);
 
+        buffer_list = vec![vec![&ray_buffer, &counter_buffer, &miss_buffer, &hit_buffer], vec![&spheres_buffer, &bvh_buffer]];
+        read_flag = vec![vec![true, false, false, false], vec![true, true]];
         let extend_kernel
-            = ExtendKernel::new(Rc::clone(&wgpu_state),
-                                &frame_buffer,
-                                &ray_buffer,
-                                &miss_buffer,
-                                &hit_buffer,
-                                &counter_buffer,
-                                &spheres_buffer,
-                                &bvh_buffer);
+            = Kernel::new("extend", Rc::clone(&wgpu_state),
+                                buffer_list, read_flag);
 
+        buffer_list = vec![vec![&image_buffer, &frame_buffer, &ray_buffer,
+                                &extension_ray_buffer, &hit_buffer, &counter_buffer],
+                           vec![&spheres_buffer, &materials_buffer]];
+        read_flag = vec![vec![false, true, false, false, false, false], vec![true, true]];
         let shade_kernel
-            = ShadeKernel::new(Rc::clone(&wgpu_state),
-                               &image_buffer,
-                               &frame_buffer,
-                               &ray_buffer,
-                               &extension_ray_buffer,
-                               &hit_buffer,
-                               &counter_buffer,
-                               &spheres_buffer,
-                               &materials_buffer
-        );
+            = Kernel::new("shade", Rc::clone(&wgpu_state),
+                               buffer_list, read_flag);
 
-        let miss_kernel
-            = MissKernel::new(Rc::clone(&wgpu_state), &image_buffer,
-                              &ray_buffer, &miss_buffer,
-                              &counter_buffer);
+        buffer_list = vec![vec![&image_buffer, &ray_buffer, &miss_buffer, &counter_buffer]];
+        read_flag = vec![vec![false, true, false, true]];
+        let miss_kernel = Kernel::new("miss_kernel",
+                                      Rc::clone(&wgpu_state), buffer_list, read_flag);
 
-        let accumulate_kernel
-            = AccumulateKernel::new(Rc::clone(&wgpu_state),
-                                    &image_buffer,
-                                    &accumulated_image_buffer);
+        buffer_list = vec![vec![&image_buffer, &accumulated_image_buffer]];
+        read_flag = vec![vec![false, false]];
+        let accumulate_kernel = Kernel::new("accumulate",
+                                            Rc::clone(&wgpu_state), buffer_list, read_flag);
 
         let display_kernel
             = DisplayKernel::new(Rc::clone(&wgpu_state), &accumulated_image_buffer, &frame_buffer);
@@ -304,6 +288,15 @@ impl PathTracer {
             }
         };
 
+        let workgroup_size_64 = |x:u32| {
+            let x_over_64 = x.div_ceil(64);
+            let y = (x_over_64 as f32).sqrt().ceil() as u32;
+            let fac = (1..y).rev().find(|z| { x_over_64 % z == 0 }).unwrap();
+            if (x_over_64 / fac) >= (1<<16) { (y, y) } else {
+                (fac, x_over_64 / fac)
+            }
+        };
+
         if self.render_progress.accumulated_samples() < SPP {
             // always update the frame
             let mut frame = self.render_progress.get_next_frame(&mut self.render_parameters);
@@ -335,7 +328,7 @@ impl PathTracer {
 
                 // the wavefront loop starts here; this is like the old num_bounces
                 let mut wavefront = 0;
-                let mut extend_size = workgroup_size(width * height);
+                let mut extend_size = workgroup_size_64(width * height);
                 while wavefront < 50 {
 
                     self.extend_kernel.run(extend_size);
@@ -345,15 +338,15 @@ impl PathTracer {
 
                     let num_misses = counter[0];
                     let num_hits = counter[1];
-                    if num_misses < 50 { println!("wavefront {wavefront}"); break }
+                    if num_misses < 128 { println!("wavefront {wavefront}"); break }
 
                     // after we know number of hits and misses, reset the ray counter
                     counter[2] = 0;
                     self.counter_buffer.queue_for_gpu(bytemuck::cast_slice(&counter));
 
                     // now do shading, get extension rays, and handle misses
-                    self.shade_kernel.run(workgroup_size(num_hits));
-                    self.miss_kernel.run(workgroup_size(num_misses));
+                    self.shade_kernel.run(workgroup_size_64(num_hits));
+                    self.miss_kernel.run(workgroup_size_64(num_misses));
 
                     // find the number of extension rays
                     self.wgpu_state.copy_buffer_to_buffer(&self.counter_buffer, &self.counter_read_buffer);
@@ -363,19 +356,19 @@ impl PathTracer {
                     // clear the ray buffer and copy the extension_ray_buffer into it; then clear the extension_ray_buffer
                     self.wgpu_state.copy_buffer_to_buffer(&self.extension_ray_buffer, &self.ray_buffer);
 
-                    extend_size = workgroup_size(num_extension);
+                    extend_size = workgroup_size_64(num_extension);
 
                     self.counter_buffer.queue_for_gpu(bytemuck::cast_slice(&[0u32, 0, num_extension, 0]));
                     wavefront += 1;
 
                 }
                 let gr_timing = self.generate_ray_kernel.get_timing();
-                let er_timing = self.extend_kernel.get_timing();
-                let sh_timing = self.shade_kernel.get_timing();
-                let miss_timing = self.miss_kernel.get_timing();
+                let er_timing = self.extend_kernel.get_timing() * wavefront as f32;
+                let sh_timing = self.shade_kernel.get_timing() * wavefront as f32;
+                let miss_timing = self.miss_kernel.get_timing() * wavefront as f32;
                 // sloppy solution right now, but I'm double using the sample_number for the display shader
                 // by storing the total accumulated samples in that variable
-                self.accumulate_kernel.run(workgroup_size(width * height));
+                self.accumulate_kernel.run(workgroup_size_64(width * height));
                 self.render_progress.incr_accumulated_samples(1);
                 println!("sample: {} total: {} gr: {gr_timing} er: {er_timing} sh: {sh_timing} miss: {miss_timing}",
                          self.render_progress.accumulated_samples(), gr_timing+er_timing+sh_timing+miss_timing);

@@ -53,16 +53,16 @@ struct FrameBuffer {
 @group(1) @binding(0) var<storage, read> spheres: array<Sphere>;
 @group(1) @binding(1) var<storage, read> materials: array<Material>;
 
-@compute @workgroup_size(8,4,1)
+@compute @workgroup_size(8,8,1)
 fn main(@builtin(global_invocation_id) id: vec3u,
         @builtin(workgroup_id) workgroup_id: vec3u,
         @builtin(local_invocation_index) local_index: u32,
         @builtin(num_workgroups) num_workgroups: vec3u) {
 
     let workgroup_index = workgroup_id.x +
-            workgroup_id.y * num_workgroups.x +
-            workgroup_id.z * num_workgroups.x * num_workgroups.y;
-    let idx = workgroup_index * 32u + local_index;
+            workgroup_id.y * num_workgroups.x; // +
+//            workgroup_id.z * num_workgroups.x * num_workgroups.y;
+    let idx = workgroup_index * 64u + local_index;
     if idx >= counter_buffer[1] {
             return;
     }
@@ -80,15 +80,11 @@ fn main(@builtin(global_invocation_id) id: vec3u,
     let sphere = spheres[payload.sphere_idx];
     let mat_idx = sphere.mat_idx;
 
-    // load the stored pixel color
-    var pixel_color = vec3f(image_buffer[pixel_idx].r, image_buffer[pixel_idx].g, image_buffer[pixel_idx].b);
-
     // multiply the new contribution in
-    pixel_color *= materials[mat_idx].albedo.xyz;
-
-    image_buffer[pixel_idx].r = pixel_color.x;
-    image_buffer[pixel_idx].g = pixel_color.y;
-    image_buffer[pixel_idx].b = pixel_color.z;
+    let pixel_color = materials[mat_idx].albedo.xyz;
+    image_buffer[pixel_idx].r = image_buffer[pixel_idx].r * pixel_color.x;
+    image_buffer[pixel_idx].g = image_buffer[pixel_idx].g * pixel_color.y;
+    image_buffer[pixel_idx].b = image_buffer[pixel_idx].b * pixel_color.z;
 
     // determine the extension ray
     let mat_type = payload.mat_type;

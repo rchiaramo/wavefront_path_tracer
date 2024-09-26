@@ -10,16 +10,16 @@ struct Ray {
 @group(0) @binding(2) var<storage, read_write> miss_buffer: array<u32>;
 @group(0) @binding(3) var<storage, read> counter_buffer: array<u32>;
 
-@compute @workgroup_size(8,4,1)
+@compute @workgroup_size(8,8,1)
 fn main(
     @builtin(workgroup_id) workgroup_id: vec3u,
     @builtin(local_invocation_index) local_index: u32,
     @builtin(num_workgroups) num_workgroups: vec3u) {
 
     let workgroup_index = workgroup_id.x +
-        workgroup_id.y * num_workgroups.x +
-        workgroup_id.z * num_workgroups.x * num_workgroups.y;
-    let idx = workgroup_index * 32u + local_index;
+        workgroup_id.y * num_workgroups.x; // +
+//        workgroup_id.z * num_workgroups.x * num_workgroups.y;
+    let idx = workgroup_index * 64u + local_index;
 
     if idx >= counter_buffer[0] {
         return;

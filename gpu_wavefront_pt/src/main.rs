@@ -1,12 +1,7 @@
 mod app;
 mod path_tracer;
 mod query_gpu;
-mod generate_ray;
-mod shade;
 mod display;
-mod miss;
-mod extend;
-mod accumulate;
 mod kernel;
 
 use glam::Vec3;

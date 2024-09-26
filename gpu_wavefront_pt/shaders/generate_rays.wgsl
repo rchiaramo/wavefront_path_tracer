@@ -44,21 +44,21 @@ fn main(@builtin(global_invocation_id) id: vec3u,
         @builtin(workgroup_id) workgroup_id: vec3u,
         @builtin(local_invocation_index) local_index: u32,
         @builtin(num_workgroups) num_workgroups: vec3u) {
-//    let workgroup_index = workgroup_id.x +
-//                workgroup_id.y * num_workgroups.x +
+
+    let workgroup_index = workgroup_id.x +
+                workgroup_id.y * num_workgroups.x; // +
 //                workgroup_id.z * num_workgroups.x * num_workgroups.y;
-//    let idx = workgroup_index * 64u + local_index;
+    let idx = workgroup_index * 64u + local_index;
 
     // generate rays is always called with the whole image dimension
     // therefore the workgroups dispatched times the workgroup_size yield the width and height of the image
     let width = num_workgroups.x * 8u;
     let height = num_workgroups.y * 8u;
-//    let screen_pos = id.xy;
-    let idx = id.x + id.y * width;
+    let pixel_idx = id.x + id.y * width;
 
 
     var rng_state:u32 = init_rng(id.xy, vec2(width, height), frame_buffer.frame);
-//    advance(&rng_state, frame_buffer.sample_number * 10u);
+    advance(&rng_state, frame_buffer.sample_number * 10u);
 
     var offset: vec3f = rng_next_vec3in_unit_disk(&rng_state);
     var ray: Ray;
@@ -85,7 +85,7 @@ fn main(@builtin(global_invocation_id) id: vec3u,
 
     ray.direction = normalize(ray_dir);
     ray.invDirection = 1.0 / ray.direction.xyz;
-    ray.pixel_idx = idx;
+    ray.pixel_idx = pixel_idx;
 
     ray_buffer[idx] = ray;
 }

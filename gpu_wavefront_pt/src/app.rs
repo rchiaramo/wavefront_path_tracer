@@ -100,11 +100,12 @@ impl ApplicationHandler for App {
                 }
 
                 WindowEvent::RedrawRequested => {
-                    // let now = Instant::now();
-                    // let dt = now - self.last_render_time;
-                    // self.last_render_time = now;
-                    // self.frames_per_second.update(dt);
-                    // let avg_fps= self.frames_per_second.get_avg_fps();
+                    let now = Instant::now();
+                    let dt = now - self.last_render_time;
+                    self.last_render_time = now;
+                    self.frames_per_second.update(dt);
+                    let avg_fps= self.frames_per_second.get_avg_fps();
+                    // println!("avg fps: {avg_fps}");
                     // let kernel_time= self.query_results.get_running_avg();
 
                     // gui.display_ui(window.as_ref(), path_tracer.progress(), & mut rp, avg_fps, kernel_time, dt);

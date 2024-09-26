@@ -44,15 +44,15 @@ const STACKSIZE:u32 = 10;
 @group(1) @binding(0) var<storage, read> spheres: array<Sphere>;
 @group(1) @binding(1) var<storage, read> bvhTree: array<BVHNode>;
 
-@compute @workgroup_size(8,4,1)
+@compute @workgroup_size(8,8,1)
 fn main(@builtin(workgroup_id) workgroup_id: vec3u,
         @builtin(local_invocation_index) local_index: u32,
         @builtin(num_workgroups) num_workgroups: vec3u) {
 
     let workgroup_index = workgroup_id.x +
-            workgroup_id.y * num_workgroups.x +
-            workgroup_id.z * num_workgroups.x * num_workgroups.y;
-    let idx = workgroup_index * 32u + local_index;
+            workgroup_id.y * num_workgroups.x; // +
+//            workgroup_id.z * num_workgroups.x * num_workgroups.y;
+    let idx = workgroup_index * 64u + local_index;
 
     if idx >= counter_buffer[2] {
         return;
