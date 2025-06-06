@@ -112,7 +112,7 @@ impl Queries {
         self.destination_buffer
             .slice(..)
             .map_async(wgpu::MapMode::Read, |_| ());
-        device.poll(wgpu::Maintain::wait()).panic_on_timeout();
+        device.poll(wgpu::MaintainBase::Wait).expect("failed to poll query buffer");
 
         let timestamps = {
             let timestamp_view = self

@@ -1,5 +1,4 @@
-use std::cell::{Ref, RefCell, RefMut};
-use std::rc::Rc;
+use std::cell::{RefCell};
 use std::sync::Arc;
 use wgpu::Surface;
 use winit::window::Window;
@@ -24,7 +23,7 @@ impl WgpuState {
         };
 
         let instance = wgpu::Instance::new(
-            wgpu::InstanceDescriptor {
+            &wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::PRIMARY,
                 ..Default::default()
             }
@@ -69,8 +68,8 @@ impl WgpuState {
                 },
                 label: None,
                 memory_hints: Default::default(),
+                trace: Default::default(),
             },
-            None,
         ).await.expect("Failed to create device");
 
         let surface_capabilities = surface.get_capabilities(&adapter);
@@ -133,7 +132,7 @@ impl WgpuState {
         from_buffer.name()
             .slice(..)
             .map_async(wgpu::MapMode::Read, |_| ());
-        self.device().poll(wgpu::Maintain::wait()).panic_on_timeout();
+        self.device().poll(wgpu::MaintainBase::Wait).expect("Failed to poll queue");
 
         let counter: Vec<u32> = {
             let counter_view = from_buffer.name()

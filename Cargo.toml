@@ -14,14 +14,14 @@ authors = ["rchiaramo <rchiaramo@gmail.com>"]
 edition = "2021"
 
 [workspace.dependencies]
-winit = "0.30.5"
-env_logger = "0.11.5"
-log = "0.4.22"
-wgpu = "22.1.0"
-pollster = "0.3.0"
-bytemuck = { version = "1.17.0", features = ["derive"] }
-glam = "0.29.0"
-rand = "0.9.0-alpha.2"
-imgui = { path = "../other_peoples_code/imgui-rs/imgui" }
-imgui-wgpu = { path = "../other_peoples_code/imgui-wgpu-rs"}
-imgui-winit-support = { path = "../other_peoples_code/imgui-winit-support" }
+winit = "0.30.11"
+env_logger = "0.11.8"
+log = "0.4.27"
+wgpu = "25.0.2"
+pollster = "0.4.0"
+bytemuck = { version = "1.23.0", features = ["derive"] }
+glam = "0.30.3"
+rand = "0.9.1"
+imgui = "0.12.0"
+imgui-winit-support = "0.13.0"
+imgui-wgpu = "0.25.0"

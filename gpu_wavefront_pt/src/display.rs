@@ -1,8 +1,7 @@
 use std::rc::Rc;
-use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, ComputePassTimestampWrites, ComputePipeline, Device, Queue, RenderPipeline, ShaderStages, Surface, TextureFormat};
+use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, RenderPipeline, ShaderStages, TextureFormat};
 use wavefront_common::gpu_buffer::GPUBuffer;
 use wavefront_common::wgpu_state::WgpuState;
-use crate::query_gpu::Queries;
 
 pub struct DisplayKernel {
     wgpu_state: Rc<WgpuState>,
@@ -59,13 +58,13 @@ impl DisplayKernel {
             layout: Some(&display_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs",
+                entry_point: Some("vs"),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs",
+                entry_point: Some("fs"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: TextureFormat::Bgra8Unorm,

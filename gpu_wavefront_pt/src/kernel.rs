@@ -1,11 +1,9 @@
 use std::borrow::Cow;
-use std::fmt::format;
-use std::{env, fs};
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
+use std::{fs};
 use std::rc::Rc;
-use wgpu::{BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, ComputePassTimestampWrites, ComputePipeline, Device, Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages};
+use wgpu::{BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, 
+           BindGroupLayoutDescriptor, BindGroupLayoutEntry, ComputePassTimestampWrites, ComputePipeline, 
+           ShaderModuleDescriptor, ShaderSource, ShaderStages};
 use wavefront_common::gpu_buffer::GPUBuffer;
 use wavefront_common::wgpu_state::WgpuState;
 use crate::query_gpu::{Queries, QueryResults};
@@ -79,7 +77,7 @@ impl Kernel {
             label: Some(label.as_str()),
             layout: Some(&pipeline_layout),
             module: &shader,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: Default::default(),
             cache: None,
         });
@@ -128,7 +126,7 @@ impl Kernel {
             self.timing_query.next_unused_query += 2;
             generate_rays_pass.set_pipeline(&self.pipeline);
             for (i, group) in self.bind_groups.iter().enumerate() {
-                generate_rays_pass.set_bind_group(i as u32, &group, &[]);
+                generate_rays_pass.set_bind_group(i as u32, group, &[]);
             }
             generate_rays_pass.dispatch_workgroups(workgroup_size.0, workgroup_size.1, 1);
 
