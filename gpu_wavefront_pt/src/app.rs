@@ -65,8 +65,8 @@ impl ApplicationHandler for App {
                 &self.render_parameters
             );
 
-            // let wgpu_state  = path_tracer.wgpu_state();
-            // self.gui = GUI::new(&window, wgpu_state);
+            let wgpu_state  = path_tracer.get_wgpu_state();
+            self.gui = GUI::new(&window, wgpu_state);
             self.path_tracer = Some(path_tracer);
         }
     }
@@ -77,7 +77,7 @@ impl ApplicationHandler for App {
         if window.id() != window_id { return; }
 
         let path_tracer = self.path_tracer.as_mut().unwrap();
-        // let gui = self.gui.as_mut().unwrap();
+        let gui = self.gui.as_mut().unwrap();
         let mut rp = path_tracer.get_render_parameters();
 
         if !path_tracer.input(&event) {
@@ -107,16 +107,33 @@ impl ApplicationHandler for App {
                     let avg_fps= self.frames_per_second.get_avg_fps();
                     // println!("avg fps: {avg_fps}");
                     // let kernel_time= self.query_results.get_running_avg();
+                    let kernel_time = 1.0;
 
-                    // gui.display_ui(window.as_ref(), path_tracer.progress(), & mut rp, avg_fps, kernel_time, dt);
+                    gui.display_ui(window.as_ref(), path_tracer.progress(), &mut rp, avg_fps, kernel_time, dt);
                     path_tracer.update_render_parameters(rp);
                     path_tracer.run();
+                    path_tracer.display(gui);
+                    window.request_redraw();
                 }
 
-                _ => {}
+                _ => {
+                    let generic_event: winit::event::Event<WindowEvent> = winit::event::Event::WindowEvent {
+                        window_id,
+                        event,
+                    };
+                    gui.platform.handle_event(gui.imgui.io_mut(), &window, &generic_event);
+                    window.request_redraw();
+                },
             }
         }
-        // gui.platform.handle_event(gui.imgui.io_mut(), &window, window_id, &event);
-        window.request_redraw();
+        
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        let gui = self.gui.as_mut().unwrap();
+        let window = self.window.as_ref().unwrap();
+        gui.platform
+            .prepare_frame(gui.imgui.io_mut(), &window)
+            .expect("WinitPlatform::prepare_frame failed");
     }
 }

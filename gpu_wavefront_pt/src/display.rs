@@ -1,6 +1,8 @@
 use std::rc::Rc;
+use imgui::Context;
 use wgpu::{BindGroup, BindGroupDescriptor, BindGroupLayoutDescriptor, RenderPipeline, ShaderStages, TextureFormat};
 use wavefront_common::gpu_buffer::GPUBuffer;
+use wavefront_common::gui::GUI;
 use wavefront_common::wgpu_state::WgpuState;
 
 pub struct DisplayKernel {
@@ -108,7 +110,7 @@ impl DisplayKernel {
     // submit the encoder through the queue
     // possibly present the output (display kernel)
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, gui: &mut GUI) {
         let output = self.wgpu_state.surface.borrow_mut().get_current_texture().unwrap();
         let device = self.wgpu_state.device();
         let queue = self.wgpu_state.queue();
@@ -139,14 +141,28 @@ impl DisplayKernel {
             display_pass.set_pipeline(&self.pipeline);
             display_pass.set_bind_group(0, &self.display_bind_group, &[]);
             display_pass.draw(0..6, 0..1);
-
-            // gui.imgui_renderer.render(
-            //     gui.imgui.render(), queue, device, &mut display_pass
-            // ).expect("failed to render gui");
         }
-        
-        
-        queue.submit(Some(encoder.finish()));
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("UI RenderPass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        let gui_draw_data = Context::render(&mut gui.imgui);
+        gui.imgui_renderer.render(gui_draw_data, queue, device, &mut pass).expect("Failed to render");
+        drop(pass);
+
+        queue.submit([encoder.finish()]);
         output.present();
     }
 }

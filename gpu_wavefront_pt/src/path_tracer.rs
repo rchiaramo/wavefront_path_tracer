@@ -8,6 +8,7 @@ use wavefront_common::scene::Scene;
 use wavefront_common::ray::Ray;
 use wgpu::{BufferUsages};
 use winit::event::WindowEvent;
+use wavefront_common::gui::GUI;
 use wavefront_common::wgpu_state::WgpuState;
 use crate::display::DisplayKernel;
 use crate::kernel::Kernel;
@@ -215,6 +216,10 @@ impl PathTracer {
             render_progress
         }
     }
+    
+    pub fn get_wgpu_state(&self) -> Rc<WgpuState> {
+        self.wgpu_state.clone()
+    }
 
     pub fn progress(&self) -> f32 {
         self.render_progress.progress()
@@ -367,6 +372,9 @@ impl PathTracer {
                 self.frame_buffer.queue_for_gpu(bytemuck::cast_slice(&[frame]));
             }
         }
-        self.display_kernel.run();
+    }
+    
+    pub fn display(&mut self, gui: &mut GUI) {
+        self.display_kernel.run(gui);
     }
 }
