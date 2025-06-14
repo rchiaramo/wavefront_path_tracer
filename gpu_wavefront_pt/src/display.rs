@@ -144,6 +144,8 @@ impl DisplayKernel {
             //     gui.imgui.render(), queue, device, &mut display_pass
             // ).expect("failed to render gui");
         }
+        
+        
         queue.submit(Some(encoder.finish()));
         output.present();
     }

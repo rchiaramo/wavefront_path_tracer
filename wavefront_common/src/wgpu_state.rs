@@ -84,6 +84,8 @@ impl WgpuState {
             view_formats: vec![],
             desired_maximum_frame_latency: 1,
         };
+        
+        surface.configure(&device, &surface_config);
 
         Self {
             surface: RefCell::new(surface),
@@ -107,7 +109,7 @@ impl WgpuState {
             surf_conf.width = new_size.0;
             surf_conf.height = new_size.1;
         }
-        let mut surface = self.surface.borrow_mut();
+        let surface = self.surface.borrow_mut();
         surface.configure(&self.device, &self.surface_config.borrow());
     }
 
